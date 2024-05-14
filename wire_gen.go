@@ -6,6 +6,15 @@
 
 package gpt
 
+import (
+	"github.com/hayeah/goo"
+)
+
+import (
+	_ "github.com/golang-migrate/migrate/v4/database/sqlite3"
+	_ "github.com/mattn/go-sqlite3"
+)
+
 // Injectors from wire.go:
 
 func InitApp() (*App, error) {
@@ -17,9 +26,35 @@ func InitApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	client := ProvideOpenAI(config)
+	gooConfig := ProvideGooConfig(config)
+	shutdownContext, err := goo.ProvideShutdownContext()
+	if err != nil {
+		return nil, err
+	}
+	logger, err := goo.ProvideZeroLogger(gooConfig, shutdownContext)
+	if err != nil {
+		return nil, err
+	}
+	db, err := goo.ProvideSQLX(gooConfig, shutdownContext, logger)
+	if err != nil {
+		return nil, err
+	}
+	jsondb := ProvideJSONDB(db)
+	assistantManager := &AssistantManager{
+		OAI:    client,
+		JSONDB: jsondb,
+	}
+	migrate, err := goo.ProvideMigrate(gooConfig)
+	if err != nil {
+		return nil, err
+	}
 	app := &App{
-		Args:   args,
-		Config: config,
+		Args:    args,
+		Config:  config,
+		OAI:     client,
+		AM:      assistantManager,
+		Migrate: migrate,
 	}
 	return app, nil
 }
