@@ -34,6 +34,22 @@ type PushCmd struct {
 	SetUpstream bool   `arg:"-u"`
 }
 
+type RunCmd struct {
+	Message string `arg:"positional,required"`
+}
+
+type ThreadMessagesCmd struct {
+}
+
+type ThreadUseCmd struct {
+	ID string `arg:"positional,required"`
+}
+
+type ThreadScopeCmd struct {
+	Messages *ThreadMessagesCmd `arg:"subcommand:messages" help:"list messages"`
+	Use      *ThreadUseCmd      `arg:"subcommand:use" help:"use thread"`
+}
+
 type AssistantListCmd struct {
 	// Remote      string `arg:"positional"`
 }
@@ -54,14 +70,18 @@ type AssistantScopeCmd struct {
 
 type Args struct {
 	Assistant *AssistantScopeCmd `arg:"subcommand:assistant" help:"manage assistants"`
+	Run       *RunCmd            `arg:"subcommand:run" help:"run a thread"`
+	Thread    *ThreadScopeCmd    `arg:"subcommand:thread" help:"manage threads"`
 }
 
 type App struct {
-	Args    *Args
-	Config  *Config
-	OAI     *openai.Client
-	AM      *AssistantManager
-	Migrate *migrate.Migrate
+	Args         *Args
+	Config       *Config
+	OAI          *openai.Client
+	AM           *AssistantManager
+	TM           *ThreadManager
+	ThreadRunner *ThreadRunner
+	Migrate      *migrate.Migrate
 }
 
 // hashAssistantRequest prepends sha256 to the description
@@ -107,9 +127,107 @@ func (a *App) Run() error {
 			}
 			fmt.Println("Current Assistant ID:", curid)
 		}
+	case args.Thread != nil:
+		switch {
+		case args.Thread.Messages != nil:
+			return a.TM.Messages()
+		case args.Thread.Use != nil:
+			cmd := args.Thread.Use
+			return a.TM.Use(cmd.ID)
+		default:
+			curid, err := a.TM.CurrentThreadID()
+			if err != nil {
+				return err
+			}
+			fmt.Println("Current Thread ID:", curid)
+		}
+	case args.Run != nil:
+		cmd := *args.Run
+		return a.ThreadRunner.Run(cmd)
 	}
 
 	return nil
+}
+
+type ThreadRunner struct {
+	OAI *openai.Client
+	AM  *AssistantManager
+}
+
+func (tr *ThreadRunner) Run(cmd RunCmd) error {
+	oai := tr.OAI
+
+	assistantID, err := tr.AM.CurrentAssistantID()
+	if err != nil {
+		return err
+	}
+
+	runReq := openai.RunRequest{
+		AssistantID: assistantID,
+	}
+
+	threadReq := openai.ThreadRequest{
+		Messages: []openai.ThreadMessage{
+			{
+				Role:    openai.ThreadMessageRoleUser,
+				Content: cmd.Message,
+			},
+		},
+	}
+
+	req := openai.CreateThreadAndRunRequest{
+		RunRequest: runReq,
+		Thread:     threadReq,
+	}
+
+	res, err := oai.CreateThreadAndRun(context.Background(), req)
+	if err != nil {
+		return err
+	}
+
+	spew.Dump(res)
+
+	return nil
+}
+
+type ThreadManager struct {
+	OAI    *openai.Client
+	JSONDB *JSONDB
+}
+
+// Use selects a thread
+func (tm *ThreadManager) Use(threadID string) error {
+	return tm.JSONDB.Put("currentThread", threadID)
+}
+
+// Messages retrieves messages from the current thread
+func (tm *ThreadManager) Messages() error {
+	threadID, err := tm.CurrentThreadID()
+	if err != nil {
+		return err
+	}
+
+	msgs, err := tm.OAI.ListMessage(context.Background(), threadID, nil, nil, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	spew.Dump(msgs)
+
+	return nil
+}
+
+// CurrentThreadID retrieves the current thread ID
+func (tm *ThreadManager) CurrentThreadID() (string, error) {
+	var threadID string
+	ok, err := tm.JSONDB.Get("currentThread", &threadID)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", nil
+	}
+	return threadID, nil
 }
 
 type AssistantManager struct {
@@ -246,6 +364,8 @@ var wires = wire.NewSet(
 	// ProvideLookupDB,
 	// ProvideOpenAI,
 
+	wire.Struct(new(ThreadManager), "*"),
+	wire.Struct(new(ThreadRunner), "*"),
 	wire.Struct(new(AssistantManager), "*"),
 	wire.Struct(new(App), "*"),
 )

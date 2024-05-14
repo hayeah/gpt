@@ -45,16 +45,26 @@ func InitApp() (*App, error) {
 		OAI:    client,
 		JSONDB: jsondb,
 	}
+	threadManager := &ThreadManager{
+		OAI:    client,
+		JSONDB: jsondb,
+	}
+	threadRunner := &ThreadRunner{
+		OAI: client,
+		AM:  assistantManager,
+	}
 	migrate, err := goo.ProvideMigrate(gooConfig)
 	if err != nil {
 		return nil, err
 	}
 	app := &App{
-		Args:    args,
-		Config:  config,
-		OAI:     client,
-		AM:      assistantManager,
-		Migrate: migrate,
+		Args:         args,
+		Config:       config,
+		OAI:          client,
+		AM:           assistantManager,
+		TM:           threadManager,
+		ThreadRunner: threadRunner,
+		Migrate:      migrate,
 	}
 	return app, nil
 }
