@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/golang-migrate/migrate/v4"
@@ -143,15 +145,17 @@ func (a *App) Run() error {
 		}
 	case args.Run != nil:
 		cmd := *args.Run
-		return a.ThreadRunner.Run(cmd)
+		return a.ThreadRunner.RunStream(cmd)
 	}
 
 	return nil
 }
 
 type ThreadRunner struct {
-	OAI *openai.Client
-	AM  *AssistantManager
+	OpenAIConfig *OpenAIConfig
+	OAI          *openai.Client
+	OAIV2        *OpenAIClientV2
+	AM           *AssistantManager
 }
 
 func (tr *ThreadRunner) Run(cmd RunCmd) error {
@@ -188,6 +192,49 @@ func (tr *ThreadRunner) Run(cmd RunCmd) error {
 	spew.Dump(res)
 
 	return nil
+}
+
+type createRunRequest struct {
+	AssistantID string
+	Message     string
+}
+
+var createRunTemplate = MustJSONStructTemplate[openai.CreateThreadAndRunRequest, createRunRequest](`{
+	"assistant_id": "{{.AssistantID}}",
+	"thread": {
+		"messages": [
+			{"role": "user", "content": "{{.Message}}"}
+		]
+	}
+}`)
+
+func (tr *ThreadRunner) RunStream(cmd RunCmd) error {
+	oa := tr.OAIV2
+
+	ctx := context.Background()
+
+	assistantID, err := tr.AM.CurrentAssistantID()
+	if err != nil {
+		return err
+	}
+
+	// Execute the template
+	threadRunReq, err := createRunTemplate.Execute(createRunRequest{
+		AssistantID: assistantID,
+		Message:     cmd.Message,
+	})
+	if err != nil {
+		return err
+	}
+
+	stream, err := oa.CreateThreadAndStream(ctx, *threadRunReq)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+
+	_, err = io.Copy(os.Stdout, stream)
+	return err
 }
 
 type ThreadManager struct {
@@ -345,6 +392,24 @@ func ProvideArgs() (*Args, error) {
 	return goo.ParseArgs[Args]()
 }
 
+func ProvideOpenAIConfig(cfg *Config) *OpenAIConfig {
+	return &cfg.OpenAI
+}
+
+type OpenAIClientV2 struct {
+	openai.Client
+}
+
+func ProvideOpenAIV2(cfg *Config) *OpenAIClientV2 {
+	ocfg := openai.DefaultConfig(cfg.OpenAI.APIKey)
+	ocfg.AssistantVersion = "v2"
+	oa := openai.NewClientWithConfig(ocfg)
+
+	c := OpenAIClientV2{*oa}
+
+	return &c
+}
+
 func ProvideOpenAI(cfg *Config) *openai.Client {
 	return openai.NewClient(cfg.OpenAI.APIKey)
 }
@@ -359,6 +424,8 @@ var wires = wire.NewSet(
 	ProvideConfig,
 	ProvideArgs,
 	ProvideOpenAI,
+	ProvideOpenAIV2,
+	ProvideOpenAIConfig,
 	ProvideJSONDB,
 
 	// ProvideLookupDB,

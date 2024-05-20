@@ -49,9 +49,13 @@ func InitApp() (*App, error) {
 		OAI:    client,
 		JSONDB: jsondb,
 	}
+	openAIConfig := ProvideOpenAIConfig(config)
+	openAIClientV2 := ProvideOpenAIV2(config)
 	threadRunner := &ThreadRunner{
-		OAI: client,
-		AM:  assistantManager,
+		OpenAIConfig: openAIConfig,
+		OAI:          client,
+		OAIV2:        openAIClientV2,
+		AM:           assistantManager,
 	}
 	migrate, err := goo.ProvideMigrate(gooConfig)
 	if err != nil {
