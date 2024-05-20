@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/golang-migrate/migrate/v4"
@@ -37,7 +38,8 @@ type PushCmd struct {
 }
 
 type RunCmd struct {
-	Message string `arg:"positional,required"`
+	Message        string `arg:"positional,required"`
+	ContinueThread bool   `arg:"--continue,-c" help:"run message using the current thread"`
 }
 
 type ThreadMessagesCmd struct {
@@ -48,8 +50,13 @@ type ThreadUseCmd struct {
 }
 
 type ThreadScopeCmd struct {
+	Show     *ThreadShowCmd     `arg:"subcommand:show" help:"show thread info"`
 	Messages *ThreadMessagesCmd `arg:"subcommand:messages" help:"list messages"`
 	Use      *ThreadUseCmd      `arg:"subcommand:use" help:"use thread"`
+}
+
+type ThreadShowCmd struct {
+	ThreadID string `arg:"positional"`
 }
 
 type AssistantListCmd struct {
@@ -64,7 +71,12 @@ type AssistantCreateCmd struct {
 	AssistantFile string `arg:"positional,required"`
 }
 
+type AssistantShowCmd struct {
+	ID string `arg:"positional"`
+}
+
 type AssistantScopeCmd struct {
+	Show   *AssistantShowCmd   `arg:"subcommand:show" help:"show assistant info"`
 	List   *AssistantListCmd   `arg:"subcommand:ls" help:"list assistants"`
 	Use    *AssistantUseCmd    `arg:"subcommand:use" help:"use assistant"`
 	Create *AssistantCreateCmd `arg:"subcommand:create" help:"create assistant"`
@@ -109,11 +121,13 @@ func hashAssistantRequest(aReq *openai.AssistantRequest) error {
 
 func (a *App) Run() error {
 	args := a.Args
-	spew.Dump(args)
 
 	switch {
 	case args.Assistant != nil:
 		switch {
+		case args.Assistant.Show != nil:
+			cmd := args.Assistant.Show
+			return a.AM.Show(cmd.ID)
 		case args.Assistant.Create != nil:
 			cmd := args.Assistant.Create
 			return a.AM.Create(cmd.AssistantFile)
@@ -131,6 +145,9 @@ func (a *App) Run() error {
 		}
 	case args.Thread != nil:
 		switch {
+		case args.Thread.Show != nil:
+			cmd := args.Thread.Show
+			return a.TM.Show(cmd.ThreadID)
 		case args.Thread.Messages != nil:
 			return a.TM.Messages()
 		case args.Thread.Use != nil:
@@ -156,42 +173,7 @@ type ThreadRunner struct {
 	OAI          *openai.Client
 	OAIV2        *OpenAIClientV2
 	AM           *AssistantManager
-}
-
-func (tr *ThreadRunner) Run(cmd RunCmd) error {
-	oai := tr.OAI
-
-	assistantID, err := tr.AM.CurrentAssistantID()
-	if err != nil {
-		return err
-	}
-
-	runReq := openai.RunRequest{
-		AssistantID: assistantID,
-	}
-
-	threadReq := openai.ThreadRequest{
-		Messages: []openai.ThreadMessage{
-			{
-				Role:    openai.ThreadMessageRoleUser,
-				Content: cmd.Message,
-			},
-		},
-	}
-
-	req := openai.CreateThreadAndRunRequest{
-		RunRequest: runReq,
-		Thread:     threadReq,
-	}
-
-	res, err := oai.CreateThreadAndRun(context.Background(), req)
-	if err != nil {
-		return err
-	}
-
-	spew.Dump(res)
-
-	return nil
+	JSONDB       *JSONDB
 }
 
 type createRunRequest struct {
@@ -199,7 +181,7 @@ type createRunRequest struct {
 	Message     string
 }
 
-var createRunTemplate = MustJSONStructTemplate[openai.CreateThreadAndRunRequest, createRunRequest](`{
+var createThreadAndRunTemplate = MustJSONStructTemplate[openai.CreateThreadAndRunRequest, createRunRequest](`{
 	"assistant_id": "{{.AssistantID}}",
 	"thread": {
 		"messages": [
@@ -208,9 +190,15 @@ var createRunTemplate = MustJSONStructTemplate[openai.CreateThreadAndRunRequest,
 	}
 }`)
 
+var createRunTemplate = MustJSONStructTemplate[openai.RunRequest, createRunRequest](`{
+	"assistant_id": "{{.AssistantID}}",
+	"additional_messages": [
+		{"role": "user", "content": "{{.Message}}"}
+	]
+}`)
+
 func (tr *ThreadRunner) RunStream(cmd RunCmd) error {
 	oa := tr.OAIV2
-
 	ctx := context.Background()
 
 	assistantID, err := tr.AM.CurrentAssistantID()
@@ -218,33 +206,111 @@ func (tr *ThreadRunner) RunStream(cmd RunCmd) error {
 		return err
 	}
 
-	// Execute the template
-	threadRunReq, err := createRunTemplate.Execute(createRunRequest{
-		AssistantID: assistantID,
-		Message:     cmd.Message,
-	})
-	if err != nil {
-		return err
+	var threadID string
+	if cmd.ContinueThread {
+		_, err := tr.JSONDB.Get("currentThread", &threadID)
+
+		if err != nil {
+			return err
+		}
 	}
 
-	stream, err := oa.CreateThreadAndStream(ctx, *threadRunReq)
-	if err != nil {
-		return err
+	var stream *openai.StreamerV2
+	if threadID != "" {
+		runReq, err := createRunTemplate.Execute(createRunRequest{
+			AssistantID: assistantID,
+			Message:     cmd.Message,
+		})
+		if err != nil {
+			return err
+		}
+
+		stream, err = oa.CreateRunStream(ctx, threadID, *runReq)
+		if err != nil {
+			return err
+		}
+	} else {
+		// 	runReq := openai.RunRequest{
+		// 		AssistantID: assistantID,
+		// 	}
+
+		// 	threadReq := openai.ThreadRequest{
+		// 		Messages: []openai.ThreadMessage{
+		// 			{
+		// 				Role:    openai.ThreadMessageRoleUser,
+		// 				Content: cmd.Message,
+		// 			},
+		// 		},
+		// 	}
+
+		// 	req := openai.CreateThreadAndRunRequest{
+		// 		RunRequest: runReq,
+		// 		Thread:     threadReq,
+		// 	}
+
+		threadRunReq, err := createThreadAndRunTemplate.Execute(createRunRequest{
+			AssistantID: assistantID,
+			Message:     cmd.Message,
+		})
+		if err != nil {
+			return err
+		}
+
+		stream, err = oa.CreateThreadAndRunStream(ctx, *threadRunReq)
+		if err != nil {
+			return err
+		}
 	}
+
 	defer stream.Close()
+
+loop:
+	for stream.Next() {
+		event := stream.Event()
+
+		switch event := event.(type) {
+		case *openai.StreamThreadCreated:
+			spew.Dump(event.ID)
+			tr.JSONDB.Put("currentThread", event.Thread.ID)
+		case *openai.StreamThreadRunCreated:
+			spew.Dump(event.ID)
+			break loop
+		}
+	}
 
 	_, err = io.Copy(os.Stdout, stream)
 	return err
 }
 
 type ThreadManager struct {
-	OAI    *openai.Client
+	OAI    *OpenAIClientV2
 	JSONDB *JSONDB
 }
 
 // Use selects a thread
 func (tm *ThreadManager) Use(threadID string) error {
 	return tm.JSONDB.Put("currentThread", threadID)
+}
+
+// Show retrieves thread info
+func (tm *ThreadManager) Show(threadID string) error {
+	var err error
+	if threadID == "" {
+		threadID, err = tm.CurrentThreadID()
+		if err != nil {
+			return err
+		}
+
+	}
+
+	thread, err := tm.OAI.RetrieveThread(context.Background(), threadID)
+	if err != nil {
+		return err
+	}
+
+	goo.PrintJSON(thread)
+
+	return nil
 }
 
 // Messages retrieves messages from the current thread
@@ -254,12 +320,23 @@ func (tm *ThreadManager) Messages() error {
 		return err
 	}
 
-	msgs, err := tm.OAI.ListMessage(context.Background(), threadID, nil, nil, nil, nil)
+	list, err := tm.OAI.ListMessage(context.Background(), threadID, nil, nil, nil, nil)
 	if err != nil {
 		return err
 	}
 
-	spew.Dump(msgs)
+	// slices.Reverse()
+	slices.Reverse(list.Messages)
+
+	for _, msg := range list.Messages {
+		spew.Dump(msg.Role)
+		for _, content := range msg.Content {
+			if content.Text != nil {
+				fmt.Print(content.Text.Value)
+			}
+		}
+		fmt.Println()
+	}
 
 	return nil
 }
@@ -278,9 +355,29 @@ func (tm *ThreadManager) CurrentThreadID() (string, error) {
 }
 
 type AssistantManager struct {
-	OAI *openai.Client
-	// DB  *sqlx.DB
+	OAI    *OpenAIClientV2
 	JSONDB *JSONDB
+}
+
+// Show retrieves assistant info
+func (am *AssistantManager) Show(assistantID string) error {
+	var err error
+	if assistantID == "" {
+		assistantID, err = am.CurrentAssistantID()
+		if err != nil {
+			return err
+		}
+	}
+
+	assistant, err := am.OAI.RetrieveAssistant(context.Background(), assistantID)
+	if err != nil {
+		return err
+	}
+
+	goo.PrintJSON(assistant)
+
+	return nil
+
 }
 
 func (am *AssistantManager) List() error {

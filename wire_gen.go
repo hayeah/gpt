@@ -27,6 +27,7 @@ func InitApp() (*App, error) {
 		return nil, err
 	}
 	client := ProvideOpenAI(config)
+	openAIClientV2 := ProvideOpenAIV2(config)
 	gooConfig := ProvideGooConfig(config)
 	shutdownContext, err := goo.ProvideShutdownContext()
 	if err != nil {
@@ -42,20 +43,20 @@ func InitApp() (*App, error) {
 	}
 	jsondb := ProvideJSONDB(db)
 	assistantManager := &AssistantManager{
-		OAI:    client,
+		OAI:    openAIClientV2,
 		JSONDB: jsondb,
 	}
 	threadManager := &ThreadManager{
-		OAI:    client,
+		OAI:    openAIClientV2,
 		JSONDB: jsondb,
 	}
 	openAIConfig := ProvideOpenAIConfig(config)
-	openAIClientV2 := ProvideOpenAIV2(config)
 	threadRunner := &ThreadRunner{
 		OpenAIConfig: openAIConfig,
 		OAI:          client,
 		OAIV2:        openAIClientV2,
 		AM:           assistantManager,
+		JSONDB:       jsondb,
 	}
 	migrate, err := goo.ProvideMigrate(gooConfig)
 	if err != nil {
