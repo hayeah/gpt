@@ -310,6 +310,7 @@ func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
 	}
 	defer outf.Close()
 
+processStream:
 	stream.TeeSSE(outf)
 
 	for stream.Next() {
@@ -335,9 +336,42 @@ func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
 			if err != nil {
 				return err
 			}
+
 		case *openai.StreamThreadRunRequiresAction:
-			fmt.Println("Requires action")
-			goo.PrintJSON(event.Run.RequiredAction.SubmitToolOutputs.ToolCalls)
+			var toolOutputs []openai.ToolOutput
+			for _, toolcall := range event.Run.RequiredAction.SubmitToolOutputs.ToolCalls {
+				output, err := handleFunctionCall(&toolcall.Function)
+				if err != nil {
+					// TODO submit error to the assistant?
+					return err
+				}
+
+				toolOutputs = append(toolOutputs, openai.ToolOutput{
+					ToolCallID: toolcall.ID,
+					Output:     output,
+				})
+			}
+
+			submitOutputs := openai.SubmitToolOutputsRequest{
+				ToolOutputs: toolOutputs,
+			}
+
+			// fmt.Println("Requires action")
+			// goo.PrintJSON(event.Run.RequiredAction.SubmitToolOutputs.ToolCalls)
+			// goo.PrintJSON(submitOutputs)
+
+			// RequiresAction is the last event before DONE. Close the previous
+			// stream before starting the new tool outputs stream.
+			stream.Next() // consume the DONE event, for completion's sake
+			stream.Close()
+
+			// start a new submit stream
+			stream, err = oa.SubmitToolOutputsStream(ctx, event.ThreadID, event.Run.ID, submitOutputs)
+			if err != nil {
+				return err
+			}
+
+			goto processStream
 		case *openai.StreamThreadRunCompleted:
 		}
 	}
@@ -355,6 +389,15 @@ func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
 	// _, err = io.Copy(os.Stdout, stream)
 
 	return err
+}
+
+func handleFunctionCall(call *openai.FunctionCall) (string, error) {
+
+	// fmt.Println("Function:", tc.Function)
+	// fmt.Println("Tool:", tc.Tool)
+	// fmt.Println("Output:", tc.Output)
+
+	return "1.7724538509055159", nil
 }
 
 type RunManager struct {
