@@ -37,7 +37,7 @@ type PushCmd struct {
 	SetUpstream bool   `arg:"-u"`
 }
 
-type RunCmd struct {
+type SendCmd struct {
 	Message        string `arg:"positional,required"`
 	ContinueThread bool   `arg:"--continue,-c" help:"run message using the current thread"`
 }
@@ -84,7 +84,7 @@ type AssistantScopeCmd struct {
 
 type Args struct {
 	Assistant *AssistantScopeCmd `arg:"subcommand:assistant" help:"manage assistants"`
-	Run       *RunCmd            `arg:"subcommand:run" help:"run a thread"`
+	Send      *SendCmd           `arg:"subcommand:send" help:"run a message in a thread"`
 	Thread    *ThreadScopeCmd    `arg:"subcommand:thread" help:"manage threads"`
 }
 
@@ -160,8 +160,8 @@ func (a *App) Run() error {
 			}
 			fmt.Println("Current Thread ID:", curid)
 		}
-	case args.Run != nil:
-		cmd := *args.Run
+	case args.Send != nil:
+		cmd := *args.Send
 		return a.ThreadRunner.RunStream(cmd)
 	}
 
@@ -197,7 +197,7 @@ var createRunTemplate = MustJSONStructTemplate[openai.RunRequest, createRunReque
 	]
 }`)
 
-func (tr *ThreadRunner) RunStream(cmd RunCmd) error {
+func (tr *ThreadRunner) RunStream(cmd SendCmd) error {
 	oa := tr.OAIV2
 	ctx := context.Background()
 
