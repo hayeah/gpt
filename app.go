@@ -398,6 +398,20 @@ func (am *AssistantManager) Create(filePath string) error {
 		return err
 	}
 
+	// NOTE: the yaml is parsing into any correctly, but th mapping from that to
+	// openai.AssistantRequest is not working because of its custom UnmarshalJSON
+
+	// fileData, err := os.ReadFile(filePath)
+	// if err != nil {
+	// 	return err
+	// }
+	// var yamlObj interface{}
+	// err = yaml.Unmarshal(fileData, &yamlObj)
+	// if err != nil {
+	// 	return err
+	// }
+	// spew.Dump(yamlObj)
+
 	err = hashAssistantRequest(&aReq)
 	if err != nil {
 		return err
@@ -412,7 +426,7 @@ func (am *AssistantManager) Create(filePath string) error {
 		return err
 	}
 
-	spew.Dump(assistant)
+	goo.PrintJSON(assistant)
 
 	return nil
 }
