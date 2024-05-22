@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"slices"
 
 	"github.com/davecgh/go-spew/spew"
@@ -33,6 +34,7 @@ type OpenAIConfig struct {
 type SendCmdScope struct {
 	Message        string `arg:"positional,required"`
 	ContinueThread bool   `arg:"--continue,-c" help:"run message using the current thread"`
+	Tools          string `arg:"--tools" help:"process tool use with the given command"`
 }
 
 type ThreadMessagesCmd struct {
@@ -344,9 +346,22 @@ processStream:
 			}
 
 		case *openai.StreamThreadRunRequiresAction:
+			// FIXME: handle action
+			// return nil
+
+			if cmd.Tools == "" {
+				return fmt.Errorf("--tools is required to handle tool calls")
+			}
+
 			var toolOutputs []openai.ToolOutput
 			for _, toolcall := range event.Run.RequiredAction.SubmitToolOutputs.ToolCalls {
-				output, err := handleFunctionCall(&toolcall.Function)
+				caller := CommandCaller{Program: cmd.Tools}
+
+				fmt.Println("Tools:", cmd.Tools)
+				goo.PrintJSON(toolcall)
+
+				output, err := caller.Exec(&toolcall.Function)
+				fmt.Println("Tool Output:", output)
 				if err != nil {
 					// TODO submit error to the assistant?
 					return err
@@ -397,14 +412,38 @@ processStream:
 	return err
 }
 
-func handleFunctionCall(call *openai.FunctionCall) (string, error) {
-
-	// fmt.Println("Function:", tc.Function)
-	// fmt.Println("Tool:", tc.Tool)
-	// fmt.Println("Output:", tc.Output)
-
-	return "1.7724538509055159", nil
+type ToolCaller interface {
+	Exec(call *openai.FunctionCall) (string, error)
 }
+
+type CommandCaller struct {
+	Program string
+}
+
+func (c *CommandCaller) Exec(call *openai.FunctionCall) (string, error) {
+	goo.PrintJSON(call)
+
+	cmd := exec.Command("sh", "-c", c.Program)
+	// cmd := exec.Command("python3", "eval.py")
+
+	// NOTE: env vars are NAME=VALUE strings, where VALUE is a null terminated
+	// string. No escape is necessary.
+	//
+	// See:
+	// https://man7.org/linux/man-pages/man7/environ.7.html
+	cmd.Env = append(os.Environ(), "TOOL_NAME="+call.Name, "TOOL_ARGS="+call.Arguments)
+
+	out, err := cmd.CombinedOutput()
+
+	return string(out), err
+}
+
+// func handleFunctionCall(call *openai.FunctionCall) (string, error) {
+// 	fmt.Println("Function:", call.Name)
+// 	fmt.Println("Arguments:", call.Arguments)
+
+// 	return "1.7724538509055159", nil
+// }
 
 type RunManager struct {
 	oai *OpenAIClientV2
@@ -555,20 +594,6 @@ func (am *AssistantManager) Create(filePath string) error {
 	if err != nil {
 		return err
 	}
-
-	// NOTE: the yaml is parsing into any correctly, but th mapping from that to
-	// openai.AssistantRequest is not working because of its custom UnmarshalJSON
-
-	// fileData, err := os.ReadFile(filePath)
-	// if err != nil {
-	// 	return err
-	// }
-	// var yamlObj interface{}
-	// err = yaml.Unmarshal(fileData, &yamlObj)
-	// if err != nil {
-	// 	return err
-	// }
-	// spew.Dump(yamlObj)
 
 	err = hashAssistantRequest(&aReq)
 	if err != nil {
