@@ -76,7 +76,11 @@ type AssistantCmdScope struct {
 }
 
 type RunCmdScope struct {
-	Show *RunShowCmd `arg:"subcommand:show" help:"show run info"`
+	Show      *RunShowCmd      `arg:"subcommand:show" help:"show run info"`
+	ListSteps *RunListStepsCmd `arg:"subcommand:steps" help:"show steps"`
+}
+
+type RunListStepsCmd struct {
 }
 
 type RunShowCmd struct {
@@ -87,7 +91,7 @@ type Args struct {
 	Assistant *AssistantCmdScope `arg:"subcommand:assistant" help:"manage assistants"`
 	Send      *SendCmdScope      `arg:"subcommand:send" help:"run a message in a thread"`
 	Thread    *ThreadCmdScope    `arg:"subcommand:thread" help:"manage threads"`
-	Run       *RunCmdScope       `arg:"subcommand:run" help:"mange runs"`
+	Run       *RunCmdScope       `arg:"subcommand:run" help:"manage runs"`
 }
 
 type App struct {
@@ -165,6 +169,8 @@ func (a *App) Run() error {
 		switch {
 		case args.Run.Show != nil:
 			return a.RunManager.Show()
+		case args.Run.ListSteps != nil:
+			return a.RunManager.ListSteps()
 		default:
 			return a.RunManager.Show()
 		}
@@ -422,6 +428,27 @@ func (rm *RunManager) Show() error {
 	}
 
 	goo.PrintJSON(run)
+
+	return nil
+}
+
+func (rm *RunManager) ListSteps() error {
+	threadID, err := rm.db.CurrentThreadID()
+	if err != nil {
+		return err
+	}
+
+	runID, err := rm.db.CurrentRunID()
+	if err != nil {
+		return err
+	}
+
+	steps, err := rm.oai.ListRunSteps(context.Background(), threadID, runID, openai.Pagination{})
+	if err != nil {
+		return err
+	}
+
+	goo.PrintJSON(steps)
 
 	return nil
 }
