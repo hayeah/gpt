@@ -43,8 +43,8 @@ type ThreadUseCmd struct {
 }
 
 type ThreadCmdScope struct {
-	Show     *ThreadShowCmd     `arg:"subcommand:show" help:"show thread info"`
-	Messages *ThreadMessagesCmd `arg:"subcommand:messages" help:"list messages"`
+	Show     *ThreadShowCmd     `arg:"subcommand:show" help:"show current thread info"`
+	Messages *ThreadMessagesCmd `arg:"subcommand:messages" help:"list messages of current thread"`
 	Use      *ThreadUseCmd      `arg:"subcommand:use" help:"use thread"`
 }
 
