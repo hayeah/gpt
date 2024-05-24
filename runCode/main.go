@@ -6,12 +6,30 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
 
 type ToolArgs struct {
 	Code string `json:"code"`
 }
 
+func createTempDir(baseDir string) (string, error) {
+	// Ensure the base directory exists
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return "", fmt.Errorf("error creating base directory: %v", err)
+	}
+
+	// Generate an order/shell friendly timestamp
+	timestamp := time.Now().Format("20060102-150405")
+
+	// Create the temporary directory with the timestamp
+	tempDir, err := os.MkdirTemp(baseDir, fmt.Sprintf("run-%s-", timestamp))
+	if err != nil {
+		return "", fmt.Errorf("error creating temporary directory: %v", err)
+	}
+
+	return tempDir, nil
+}
 func run() error {
 	toolArgs := os.Getenv("TOOL_ARGS")
 	if toolArgs == "" {
@@ -33,7 +51,7 @@ func run() error {
 		return fmt.Errorf("the code to evaluate is not provided in TOOL_ARGS")
 	}
 
-	tempDir, err := os.MkdirTemp("./runCode", "run-*")
+	tempDir, err := createTempDir("./runCode")
 	if err != nil {
 		return fmt.Errorf("error creating temporary directory: %v", err)
 	}
@@ -47,13 +65,14 @@ func run() error {
 		}
 
 		cmd := exec.Command("python3", tempFile)
-		cmdOutput, err := cmd.CombinedOutput()
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		err := cmd.Run()
+		// cmdOutput, err := cmd.CombinedOutput()
 		if err != nil {
-			return fmt.Errorf("error running Python script: %v\nOutput: %s", err, string(cmdOutput))
+			return fmt.Errorf("error running Python script: %w", err)
 		}
-
-		fmt.Printf("Success: %s\n", string(cmdOutput))
-
 	} else if toolName == "evalGolang" {
 		tempFile := filepath.Join(tempDir, "main.go")
 		err = os.WriteFile(tempFile, []byte(args.Code), 0644)
@@ -63,19 +82,22 @@ func run() error {
 
 		binaryFile := filepath.Join(tempDir, "program")
 		cmd := exec.Command("go", "build", "-o", binaryFile, tempFile)
-		output, err := cmd.CombinedOutput()
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		err := cmd.Run()
 		if err != nil {
 			return fmt.Errorf("error compiling Go code: %v\nOutput: %s", err, string(output))
 		}
 
 		cmd = exec.Command(binaryFile)
-		cmdOutput, err := cmd.CombinedOutput()
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		err = cmd.Run()
 		if err != nil {
 			return fmt.Errorf("error running compiled program: %v\nOutput: %s", err, string(cmdOutput))
 		}
-
-		fmt.Printf("Success: %s\n", string(cmdOutput))
-
 	} else {
 		return fmt.Errorf("unsupported TOOL_NAME: %s", toolName)
 	}
