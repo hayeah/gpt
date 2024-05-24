@@ -56,12 +56,14 @@ func InitApp() (*App, error) {
 		db:  appDB,
 	}
 	openAIConfig := ProvideOpenAIConfig(config)
+	slogLogger := ProvideSlog()
 	threadRunner := &ThreadRunner{
 		OpenAIConfig: openAIConfig,
 		OAI:          client,
 		OAIV2:        openAIClientV2,
 		AM:           assistantManager,
 		appDB:        appDB,
+		log:          slogLogger,
 	}
 	migrate, err := goo.ProvideMigrate(gooConfig)
 	if err != nil {

@@ -69,9 +69,14 @@ func run() error {
 		cmd.Stderr = os.Stderr
 
 		err := cmd.Run()
-		// cmdOutput, err := cmd.CombinedOutput()
+
+		if _, ok := err.(*exec.ExitError); ok {
+			exitCode := cmd.ProcessState.ExitCode()
+			os.Exit(exitCode)
+		}
+
 		if err != nil {
-			return fmt.Errorf("error running Python script: %w", err)
+			return err
 		}
 	} else if toolName == "evalGolang" {
 		tempFile := filepath.Join(tempDir, "main.go")
@@ -87,7 +92,7 @@ func run() error {
 
 		err := cmd.Run()
 		if err != nil {
-			return fmt.Errorf("error compiling Go code: %v\nOutput: %s", err, string(output))
+			return fmt.Errorf("error compiling Go code: %w", err)
 		}
 
 		cmd = exec.Command(binaryFile)
@@ -96,7 +101,7 @@ func run() error {
 
 		err = cmd.Run()
 		if err != nil {
-			return fmt.Errorf("error running compiled program: %v\nOutput: %s", err, string(cmdOutput))
+			return fmt.Errorf("error running compiled program: %v", err)
 		}
 	} else {
 		return fmt.Errorf("unsupported TOOL_NAME: %s", toolName)

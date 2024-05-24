@@ -1,14 +1,13 @@
 package gpt
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"slices"
@@ -224,6 +223,7 @@ type ThreadRunner struct {
 	AM           *AssistantManager
 
 	appDB *AppDB
+	log   *slog.Logger
 }
 
 type createRunRequest struct {
@@ -247,37 +247,11 @@ var createRunTemplate = MustJSONStructTemplate[openai.RunRequest, createRunReque
 	]
 }`)
 
-// CodeArguments represents the expected JSON structure with a "code" property.
-type CodeArguments struct {
-	Code string `json:"code"`
-}
-
-// PartialDecodeCodeArguments attempts to decode a JSON string that contains the "code" property.
-// It tries to parse the input as is, appends a closing brace if the first parse fails, and tries again.
-func PartialDecodeCodeArguments(input []byte) (string, error) {
-	var data CodeArguments
-
-	// First attempt to unmarshal the JSON as is.
-	err := json.Unmarshal(input, &data)
-	if err == nil {
-		return data.Code, nil
-	}
-
-	// Try appending a closing curly brace to complete the object, then parse again.
-	r := io.MultiReader(bytes.NewReader(input), bytes.NewReader([]byte(`"}`)))
-	err = json.NewDecoder(r).Decode(&data)
-	// err = json.(append(input, []byte(`"}`)...), &data)
-	if err == nil {
-		return data.Code, nil
-	}
-
-	// If it still fails, return an invalid JSON error.
-	return "", fmt.Errorf("invalid JSON")
-}
-
 func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
 	oa := tr.OAIV2
 	ctx := context.Background()
+
+	log := tr.log
 
 	assistantID, err := tr.AM.CurrentAssistantID()
 	if err != nil {
@@ -308,24 +282,6 @@ func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
 			return err
 		}
 	} else {
-		// 	runReq := openai.RunRequest{
-		// 		AssistantID: assistantID,
-		// 	}
-
-		// 	threadReq := openai.ThreadRequest{
-		// 		Messages: []openai.ThreadMessage{
-		// 			{
-		// 				Role:    openai.ThreadMessageRoleUser,
-		// 				Content: cmd.Message,
-		// 			},
-		// 		},
-		// 	}
-
-		// 	req := openai.CreateThreadAndRunRequest{
-		// 		RunRequest: runReq,
-		// 		Thread:     threadReq,
-		// 	}
-
 		threadRunReq, err := createThreadAndRunTemplate.Execute(createRunRequest{
 			AssistantID: assistantID,
 			Message:     cmd.Message,
@@ -351,8 +307,7 @@ func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
 processStream:
 	stream.TeeSSE(outf)
 
-	var buf bytes.Buffer
-	var lastCode string
+	toolw := os.Stderr
 
 	for stream.Next() {
 		// process text delta
@@ -381,46 +336,48 @@ processStream:
 			for _, tc := range event.RunStepDelta.Delta.StepDetails.ToolCalls {
 				switch {
 				case tc.Function.Name != "":
-					fmt.Println(tc.Function.Name)
+					toolw.WriteString("\n")
+					log.Info("FunctionCall", "name", tc.Function.Name)
 				case tc.Function.Arguments != "":
-					buf.Write([]byte(tc.Function.Arguments))
-					// fmt.Print(tc.Function.Arguments)
+					toolw.WriteString(tc.Function.Arguments)
 				}
 
-				code, err := PartialDecodeCodeArguments(buf.Bytes())
-				if err == nil {
-					newCode := code[len(lastCode):]
-					lastCode = code
-					fmt.Print(newCode)
-					// buf.Reset()
-				}
+				// code, err := PartialDecodeCodeArguments(buf.Bytes())
+				// if err == nil {
+				// 	newCode := code[len(lastCode):]
+				// 	lastCode = code
+				// 	fmt.Print(newCode)
+				// }
 			}
 
 		case *openai.StreamThreadRunRequiresAction:
-			// FIXME: handle action
-			// return nil
-			fmt.Println("")
+			toolw.WriteString("\n")
+			toolw.Sync()
 
 			if cmd.Tools == "" {
 				return fmt.Errorf("--tools is required to handle tool calls")
 			}
 
 			var toolOutputs []openai.ToolOutput
-			for _, toolcall := range event.Run.RequiredAction.SubmitToolOutputs.ToolCalls {
+			for _, tc := range event.Run.RequiredAction.SubmitToolOutputs.ToolCalls {
 				caller := CommandCaller{Program: cmd.Tools}
 
-				fmt.Println("Tools:", cmd.Tools)
-				goo.PrintJSON(toolcall)
+				log.Info("FunctionCall.Exec", "name", tc.Function.Name, "cmd", cmd.Tools)
 
-				output, err := caller.Exec(&toolcall.Function)
-				fmt.Println("Tool Output:", output)
+				output, exitcode, err := caller.Exec(&tc.Function)
+
+				// TODO: print exit status
 				if err != nil {
 					// TODO submit error to the assistant?
-					output = fmt.Sprintf("Error: %v", err)
+					output = fmt.Sprintf("Execute error: %v\n%s\n", err, output)
 				}
 
+				output = fmt.Sprintf("%s\nProgram exit code: %d\n", output, exitcode)
+
+				toolw.WriteString(output)
+
 				toolOutputs = append(toolOutputs, openai.ToolOutput{
-					ToolCallID: toolcall.ID,
+					ToolCallID: tc.ID,
 					Output:     output,
 				})
 			}
@@ -428,10 +385,6 @@ processStream:
 			submitOutputs := openai.SubmitToolOutputsRequest{
 				ToolOutputs: toolOutputs,
 			}
-
-			// fmt.Println("Requires action")
-			// goo.PrintJSON(event.Run.RequiredAction.SubmitToolOutputs.ToolCalls)
-			// goo.PrintJSON(submitOutputs)
 
 			// RequiresAction is the last event before DONE. Close the previous
 			// stream before starting the new tool outputs stream.
@@ -446,20 +399,10 @@ processStream:
 
 			goto processStream
 		case *openai.StreamThreadRunCompleted:
+			// TODO: print tokens usage
+			fmt.Println("")
 		}
 	}
-
-	//	event handlers while scanning/copying the stream...
-	// stream.OnEvent(func(event openai.StreamEvent) {
-	// 	switch event := event.(type) {
-	// 	case *openai.StreamThreadCreated:
-	// 		tr.appDB.PutCurrentThreadID(event.Thread.ID)
-	// 	case *openai.StreamThreadRunCreated:
-	// 		tr.appDB.PutCurrentRun(event.Run.ID)
-	// 	}
-	// })
-
-	// _, err = io.Copy(os.Stdout, stream)
 
 	return err
 }
@@ -472,9 +415,7 @@ type CommandCaller struct {
 	Program string
 }
 
-func (c *CommandCaller) Exec(call *openai.FunctionCall) (string, error) {
-	goo.PrintJSON(call)
-
+func (c *CommandCaller) Exec(call *openai.FunctionCall) (string, int, error) {
 	cmd := exec.Command("sh", "-c", c.Program)
 	// cmd := exec.Command("python3", "eval.py")
 
@@ -486,8 +427,10 @@ func (c *CommandCaller) Exec(call *openai.FunctionCall) (string, error) {
 	cmd.Env = append(os.Environ(), "TOOL_NAME="+call.Name, "TOOL_ARGS="+call.Arguments)
 
 	out, err := cmd.CombinedOutput()
+	exitCode := cmd.ProcessState.ExitCode()
 
-	return string(out), err
+	return string(out), exitCode, err
+
 }
 
 // func handleFunctionCall(call *openai.FunctionCall) (string, error) {
@@ -780,6 +723,12 @@ func ProvideGooConfig(cfg *Config) *goo.Config {
 	return &cfg.Config
 }
 
+func ProvideSlog() *slog.Logger {
+	// logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	return slog.Default()
+
+}
+
 var wires = wire.NewSet(
 	ProvideGooConfig,
 	goo.Wires,
@@ -790,6 +739,7 @@ var wires = wire.NewSet(
 	ProvideOpenAIConfig,
 	ProvideJSONDB,
 	ProvideAppDB,
+	ProvideSlog,
 
 	// ProvideLookupDB,
 	// ProvideOpenAI,
