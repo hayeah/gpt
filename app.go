@@ -1,12 +1,14 @@
 package gpt
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"slices"
@@ -245,6 +247,34 @@ var createRunTemplate = MustJSONStructTemplate[openai.RunRequest, createRunReque
 	]
 }`)
 
+// CodeArguments represents the expected JSON structure with a "code" property.
+type CodeArguments struct {
+	Code string `json:"code"`
+}
+
+// PartialDecodeCodeArguments attempts to decode a JSON string that contains the "code" property.
+// It tries to parse the input as is, appends a closing brace if the first parse fails, and tries again.
+func PartialDecodeCodeArguments(input []byte) (string, error) {
+	var data CodeArguments
+
+	// First attempt to unmarshal the JSON as is.
+	err := json.Unmarshal(input, &data)
+	if err == nil {
+		return data.Code, nil
+	}
+
+	// Try appending a closing curly brace to complete the object, then parse again.
+	r := io.MultiReader(bytes.NewReader(input), bytes.NewReader([]byte(`"}`)))
+	err = json.NewDecoder(r).Decode(&data)
+	// err = json.(append(input, []byte(`"}`)...), &data)
+	if err == nil {
+		return data.Code, nil
+	}
+
+	// If it still fails, return an invalid JSON error.
+	return "", fmt.Errorf("invalid JSON")
+}
+
 func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
 	oa := tr.OAIV2
 	ctx := context.Background()
@@ -321,6 +351,9 @@ func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
 processStream:
 	stream.TeeSSE(outf)
 
+	var buf bytes.Buffer
+	var lastCode string
+
 	for stream.Next() {
 		// process text delta
 		text, ok := stream.MessageDeltaText()
@@ -344,10 +377,29 @@ processStream:
 			if err != nil {
 				return err
 			}
+		case *openai.StreamRunStepDelta:
+			for _, tc := range event.RunStepDelta.Delta.StepDetails.ToolCalls {
+				switch {
+				case tc.Function.Name != "":
+					fmt.Println(tc.Function.Name)
+				case tc.Function.Arguments != "":
+					buf.Write([]byte(tc.Function.Arguments))
+					// fmt.Print(tc.Function.Arguments)
+				}
+
+				code, err := PartialDecodeCodeArguments(buf.Bytes())
+				if err == nil {
+					newCode := code[len(lastCode):]
+					lastCode = code
+					fmt.Print(newCode)
+					// buf.Reset()
+				}
+			}
 
 		case *openai.StreamThreadRunRequiresAction:
 			// FIXME: handle action
 			// return nil
+			fmt.Println("")
 
 			if cmd.Tools == "" {
 				return fmt.Errorf("--tools is required to handle tool calls")
@@ -364,7 +416,7 @@ processStream:
 				fmt.Println("Tool Output:", output)
 				if err != nil {
 					// TODO submit error to the assistant?
-					return err
+					output = fmt.Sprintf("Error: %v", err)
 				}
 
 				toolOutputs = append(toolOutputs, openai.ToolOutput{
@@ -611,7 +663,8 @@ func (am *AssistantManager) Create(filePath string) error {
 
 	goo.PrintJSON(assistant)
 
-	return nil
+	return am.JSONDB.Put("currentAssistant", assistant.ID)
+	// return nil
 }
 
 // Use selects an assistant
