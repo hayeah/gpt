@@ -13,11 +13,13 @@ import (
 	"slices"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/go-resty/resty/v2"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/google/wire"
+	"github.com/hayeah/go-gpt/oai"
 	"github.com/hayeah/goo"
+	"github.com/hayeah/goo/fetch"
 	"github.com/jmoiron/sqlx"
-	"github.com/runZeroInc/mustache/v2"
 	"github.com/sashabaranov/go-openai"
 
 	_ "github.com/golang-migrate/migrate/v4/database/sqlite3"
@@ -153,7 +155,8 @@ func (a *App) Run() error {
 			if err != nil {
 				return err
 			}
-			fmt.Println("Current Assistant ID:", curid)
+
+			return am.Show(curid)
 		}
 	case args.Thread != nil:
 		switch {
@@ -168,7 +171,8 @@ func (a *App) Run() error {
 		}
 	case args.Send != nil:
 		cmd := *args.Send
-		return a.ThreadRunner.RunStream(cmd)
+		// return a.ThreadRunner.RunStream(cmd)
+		return a.ThreadRunner.RunStream2(cmd)
 	case args.Run != nil:
 		switch {
 		case args.Run.Show != nil:
@@ -223,6 +227,8 @@ type ThreadRunner struct {
 	OAIV2        *OpenAIClientV2
 	AM           *AssistantManager
 
+	oai *OAIClient
+
 	appDB *AppDB
 	log   *slog.Logger
 }
@@ -248,25 +254,77 @@ var createRunTemplate = MustJSONStructTemplate[openai.RunRequest, createRunReque
 	]
 }`)
 
-func ToJSONString(data any) (string, error) {
-	out, err := json.Marshal(data)
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
-}
+func (tr *ThreadRunner) RunStream2(cmd SendCmdScope) error {
+	ai := tr.oai
 
-func JSONTache(template string) (*mustache.Template, error) {
-	return mustache.New().WithEscapeMode(mustache.Raw).WithValueStringer(ToJSONString).CompileString(template)
-}
-
-func RenderJSON(template string, data any) (string, error) {
-	t, err := JSONTache(template)
+	assistantID, err := tr.AM.CurrentAssistantID()
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	return t.Render(data)
+	sse, err := ai.SSE("POST", "/threads/runs", &fetch.Options{
+		Body: `{
+			"assistant_id
+			
+			": {{assistantID}},
+			"thread": {
+			  "messages": [
+				{"role": "user", "content": {{message}}}
+			  ]
+			},
+			"stream": true,
+		}`,
+
+		BodyParams: map[string]any{
+			"assistantID": assistantID,
+			"message":     cmd.Message,
+		},
+	})
+
+	if err != nil {
+		return err
+	}
+
+	defer sse.Close()
+	if sse.IsError() {
+		return fmt.Errorf("POST /threads/run error: %s\n%s", sse.Status(), sse.String())
+	}
+
+	f, err := os.Create("stream.sse")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	sse.Tee(f)
+
+	for sse.Next() {
+		event := sse.Event()
+
+		switch event.Event {
+		case "thread.created":
+			id := event.GJSON("id").String()
+			err = tr.appDB.PutCurrentThreadID(id)
+			if err != nil {
+				return err
+			}
+		case "thread.run.created":
+			id := event.GJSON("id").String()
+			err = tr.appDB.PutCurrentRun(id)
+			if err != nil {
+				return err
+			}
+		case "thread.message.delta":
+			result := event.GJSON("delta.content.#.text.value")
+			for _, item := range result.Array() {
+				fmt.Print(item.String())
+			}
+		}
+	}
+
+	fmt.Print("\n")
+
+	return sse.Err()
 }
 
 func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
@@ -601,7 +659,7 @@ func (am *AssistantManager) List() error {
 		return err
 	}
 
-	spew.Dump(as)
+	goo.PrintJSON(as)
 
 	return nil
 }
@@ -742,6 +800,15 @@ func ProvideOpenAI(cfg *Config) *openai.Client {
 	return openai.NewClient(cfg.OpenAI.APIKey)
 }
 
+type OAIClient struct {
+	fetch.Client
+}
+
+func ProvideOAI(cfg *Config) *OAIClient {
+	client := resty.New()
+	return &OAIClient{oai.V2(client, cfg.OpenAI.APIKey)}
+}
+
 func ProvideGooConfig(cfg *Config) *goo.Config {
 	return &cfg.Config
 }
@@ -763,6 +830,7 @@ var wires = wire.NewSet(
 	ProvideJSONDB,
 	ProvideAppDB,
 	ProvideSlog,
+	ProvideOAI,
 
 	// ProvideLookupDB,
 	// ProvideOpenAI,

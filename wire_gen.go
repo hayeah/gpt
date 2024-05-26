@@ -56,12 +56,14 @@ func InitApp() (*App, error) {
 		db:  appDB,
 	}
 	openAIConfig := ProvideOpenAIConfig(config)
+	oaiClient := ProvideOAI(config)
 	slogLogger := ProvideSlog()
 	threadRunner := &ThreadRunner{
 		OpenAIConfig: openAIConfig,
 		OAI:          client,
 		OAIV2:        openAIClientV2,
 		AM:           assistantManager,
+		oai:          oaiClient,
 		appDB:        appDB,
 		log:          slogLogger,
 	}
