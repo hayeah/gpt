@@ -17,6 +17,7 @@ import (
 	"github.com/google/wire"
 	"github.com/hayeah/goo"
 	"github.com/jmoiron/sqlx"
+	"github.com/runZeroInc/mustache/v2"
 	"github.com/sashabaranov/go-openai"
 
 	_ "github.com/golang-migrate/migrate/v4/database/sqlite3"
@@ -247,7 +248,29 @@ var createRunTemplate = MustJSONStructTemplate[openai.RunRequest, createRunReque
 	]
 }`)
 
+func ToJSONString(data any) (string, error) {
+	out, err := json.Marshal(data)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func JSONTache(template string) (*mustache.Template, error) {
+	return mustache.New().WithEscapeMode(mustache.Raw).WithValueStringer(ToJSONString).CompileString(template)
+}
+
+func RenderJSON(template string, data any) (string, error) {
+	t, err := JSONTache(template)
+	if err != nil {
+		return "", err
+	}
+
+	return t.Render(data)
+}
+
 func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
+
 	oa := tr.OAIV2
 	ctx := context.Background()
 
