@@ -28,10 +28,12 @@ func (it *InputText) MarshalJSON() ([]byte, error) {
 
 // Implementing the MarshalJSON method for InputImageURL
 func (iu *InputImageURL) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]string{
-		"type":   "image_url",
-		"url":    iu.URL.String(),
-		"detail": iu.Detail,
+	return json.Marshal(map[string]any{
+		"type": "image_url",
+		"image_url": map[string]string{
+			"url": iu.URL.String(),
+			// "detail":    iu.Detail,
+		},
 	})
 }
 

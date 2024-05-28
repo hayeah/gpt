@@ -15,7 +15,7 @@ func TestParseInput(t *testing.T) {
 		expectedError bool
 	}{
 		{"text:hello world", `{"type":"text","text":"hello world"}`, false},
-		{"image:https://example.com/image.jpg", `{"type":"image_url","url":"https://example.com/image.jpg","detail":"auto"}`, false},
+		{"image:https://example.com/image.jpg", `{"image_url":{"url":"https://example.com/image.jpg"},"type":"image_url"}`, false},
 		{"file:testdata/input.md", `{"type":"text","text":"hello from file input\n"}`, false},
 		{"file:-", `{"type":"text","text":"hello from stdin"}`, false},
 		{"naked input", `{"type":"text","text":"naked input"}`, false},
