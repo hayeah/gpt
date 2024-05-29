@@ -278,7 +278,6 @@ func (tr *ThreadRunner) processInputs(inputs []string) ([]json.Marshaler, error)
 func (tr *ThreadRunner) RunStream2(cmd SendCmdScope) error {
 	ai := tr.oai
 
-	goo.PrintJSON(cmd.Inputs)
 	ms, err := tr.processInputs(cmd.Inputs)
 	if err != nil {
 		return err
@@ -289,59 +288,71 @@ func (tr *ThreadRunner) RunStream2(cmd SendCmdScope) error {
 		return err
 	}
 
-	body, err := fetch.RenderJSON(`{
-		"assistant_id": {{assistantID}},
-		"thread": {
-		  "messages": [
-			{"role": "user", "content": [
-				{{#inputs}}
-				{{.}},
-				{{/inputs}}
-			]},
-		  ],
-		},
-		"stream": true,
-	}`, map[string]any{
-		"assistantID": assistantID,
-		"inputs":      ms,
-	})
+	var threadID string
+	if cmd.ContinueThread {
+		threadID, err = tr.appDB.CurrentThreadID()
+
+		if err != nil {
+			return err
+		}
+	}
+
+	var sse *fetch.SSEResponse
+
+	if threadID == "" {
+		// https://platform.openai.com/docs/api-reference/runs/createThreadAndRun
+		// POST https://api.openai.com/v1/threads/{thread_id}/runs
+		sse, err = ai.SSE("POST", "/threads/runs", &fetch.Options{
+			Body: `{
+				"assistant_id": {{assistantID}},
+				"thread": {
+				  "messages": [
+					{"role": "user", "content": [
+						{{#inputs}}
+						{{.}},
+						{{/inputs}}
+					]},
+				  ],
+				},
+				"stream": true,
+			}`,
+			BodyParams: map[string]any{
+				"assistantID": assistantID,
+				"inputs":      ms,
+			},
+		})
+	} else {
+		// https://platform.openai.com/docs/api-reference/runs/createRun
+		// POST https://api.openai.com/v1/threads/{thread_id}/runs
+		sse, err = ai.SSE("POST", "/threads/{thread_id}/runs", &fetch.Options{
+			Body: `{
+				"assistant_id": {{assistantID}},
+
+				"additional_messages": [
+					{"role": "user", "content": [
+						{{#inputs}}
+						{{.}},
+						{{/inputs}}
+					]},
+				],
+
+				"stream": true,
+			}`,
+			BodyParams: map[string]any{
+				"assistantID": assistantID,
+				"inputs":      ms,
+			},
+			PathParams: map[string]string{
+				"thread_id": threadID,
+			},
+		})
+	}
 
 	if err != nil {
 		return err
 	}
-
-	fmt.Printf("%s\n", body)
-
-	// sse, err := ai.SSE("POST", "/threads/runs", &fetch.Options{
-	// 	Body: `{
-	// 		"assistant_id
-
-	// 		": {{assistantID}},
-	// 		"thread": {
-	// 		  "messages": [
-	// 			{{#inputs}}
-	// 				{"role": "user", "content": {{.}}}
-	// 			{{/inputs}
-	// 		  ]
-	// 		},
-	// 		"stream": true,
-	// 	}`,
-
-	// 	BodyParams: map[string]any{
-	// 		"assistantID": assistantID,
-	// 		"inputs":      ms,
-	// 	},
-	// })
-
-	sse, err := ai.SSE("POST", "/threads/runs", &fetch.Options{
-		Body: body,
-	})
-
-	if err != nil {
-		return err
-	}
-
 	defer sse.Close()
+
 	if sse.IsError() {
 		return fmt.Errorf("POST /threads/run error: %s\n%s", sse.Status(), sse.String())
 	}
