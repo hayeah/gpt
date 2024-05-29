@@ -346,6 +346,8 @@ func (tr *ThreadRunner) RunStream2(cmd SendCmdScope) error {
 				"thread_id": threadID,
 			},
 		})
+
+		// TODO: move submit tool output up here
 	}
 
 	if err != nil {
@@ -363,6 +365,10 @@ func (tr *ThreadRunner) RunStream2(cmd SendCmdScope) error {
 	}
 	defer f.Close()
 
+	log := tr.log
+	toolw := os.Stderr
+
+processStream:
 	sse.Tee(f)
 
 	for sse.Next() {
@@ -386,10 +392,100 @@ func (tr *ThreadRunner) RunStream2(cmd SendCmdScope) error {
 			for _, item := range result.Array() {
 				fmt.Print(item.String())
 			}
+		case "thread.run.step.delta":
+			result := event.GJSON(`delta.step_details.tool_calls.#(type==function)#.function`)
+
+			for _, item := range result.Array() {
+				switch {
+				case item.Get("name").Exists():
+					toolw.WriteString("\n")
+					log.Info("FunctionCall", "name", item.Get("name"))
+				case item.Get("arguments").Exists():
+					toolw.WriteString(item.Get("arguments").String())
+				}
+			}
+		case "thread.run.requires_action":
+			toolw.WriteString("\n")
+			toolw.Sync()
+
+			result := event.GJSON(`required_action.submit_tool_outputs.tool_calls.#(type==function)#`)
+
+			var toolOutputs []openai.ToolOutput
+
+			for _, item := range result.Array() {
+				id := item.Get("id").Str // tool call id
+				name := item.Get("function.name").Str
+				args := item.Get("function.arguments").Str
+
+				log.Info("FunctionCall.Exec",
+					"name", name, "cmd", cmd.Tools, "args", args)
+
+				caller := CommandCaller{Program: cmd.Tools}
+
+				output, exitcode, err := caller.Exec(name, args)
+
+				// TODO: print exit status
+				if err != nil {
+					// TODO submit error to the assistant?
+					output = fmt.Sprintf("Execute error: %v\n%s\n", err, output)
+				}
+
+				output = fmt.Sprintf("%s\nProgram exit code: %d\n", output, exitcode)
+
+				toolw.WriteString(output)
+
+				// tool_call_id
+				// output
+
+				toolOutputs = append(toolOutputs, openai.ToolOutput{
+					ToolCallID: id,
+					Output:     output,
+				})
+
+			}
+
+			// submit tool output
+
+			// RequiresAction is the last event before DONE. Close the previous
+			// stream before starting the new tool outputs stream.
+			sse.Next() // consume the DONE event, for completion's sake
+			sse.Close()
+
+			runID := event.GJSON("id").String()
+			threadID := event.GJSON("thread_id").String()
+
+			// https://platform.openai.com/docs/api-reference/runs/submitToolOutputs
+			// POST https://api.openai.com/v1/threads/{thread_id}/runs/{run_id}/submit_tool_outputs
+
+			// start a new submit stream
+			sse, err = ai.SSE("POST", "/threads/{thread_id}/runs/{run_id}/submit_tool_outputs", &fetch.Options{
+				Body: `{
+						"tool_outputs": {{tool_outputs}},
+						"stream": true,
+					  }`,
+				BodyParams: map[string]any{
+					"tool_outputs": toolOutputs,
+				},
+				PathParams: map[string]string{
+					"thread_id": threadID,
+					"run_id":    runID,
+				},
+			})
+
+			if err != nil {
+				return err
+			}
+
+			goto processStream
+
+		case "thread.run.step.completed":
+			fmt.Print("\n")
+			result := event.GJSON("{thread_id,id,usage}")
+			fmt.Println(result)
+		case "done":
+			fmt.Print("\n")
 		}
 	}
-
-	fmt.Print("\n")
 
 	return sse.Err()
 }
@@ -512,7 +608,10 @@ processStream:
 
 				log.Info("FunctionCall.Exec", "name", tc.Function.Name, "cmd", cmd.Tools)
 
-				output, exitcode, err := caller.Exec(&tc.Function)
+				name := tc.Function.Name
+				args := tc.Function.Arguments
+
+				output, exitcode, err := caller.Exec(name, args)
 
 				// TODO: print exit status
 				if err != nil {
@@ -563,7 +662,7 @@ type CommandCaller struct {
 	Program string
 }
 
-func (c *CommandCaller) Exec(call *openai.FunctionCall) (string, int, error) {
+func (c *CommandCaller) Exec(name, args string) (string, int, error) {
 	cmd := exec.Command("sh", "-c", c.Program)
 	// cmd := exec.Command("python3", "eval.py")
 
@@ -572,7 +671,7 @@ func (c *CommandCaller) Exec(call *openai.FunctionCall) (string, int, error) {
 	//
 	// See:
 	// https://man7.org/linux/man-pages/man7/environ.7.html
-	cmd.Env = append(os.Environ(), "TOOL_NAME="+call.Name, "TOOL_ARGS="+call.Arguments)
+	cmd.Env = append(os.Environ(), "TOOL_NAME="+name, "TOOL_ARGS="+args)
 
 	out, err := cmd.CombinedOutput()
 	exitCode := cmd.ProcessState.ExitCode()
@@ -872,7 +971,8 @@ type OAIClient struct {
 }
 
 func ProvideOAI(cfg *Config) *OAIClient {
-	client := resty.New()
+	client := resty.New().SetDebug(true)
+	// client.EnableTrace()
 	return &OAIClient{oai.V2(client, cfg.OpenAI.APIKey)}
 }
 
