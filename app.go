@@ -480,6 +480,7 @@ processStream:
 
 		case "thread.run.step.completed":
 			fmt.Print("\n")
+			// NB: multipath doesn't work if there are spaces between the commas
 			result := event.GJSON("{thread_id,id,usage}")
 			fmt.Println(result)
 		case "done":
