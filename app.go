@@ -13,10 +13,6 @@ import (
 	"slices"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/go-resty/resty/v2"
-	"github.com/golang-migrate/migrate/v4"
-	"github.com/google/wire"
-	"github.com/hayeah/go-gpt/oai"
 	"github.com/hayeah/goo"
 	"github.com/hayeah/goo/fetch"
 	"github.com/jmoiron/sqlx"
@@ -111,7 +107,7 @@ type App struct {
 	ThreadManager    *ThreadManager
 	RunManager       *RunManager
 	ThreadRunner     *ThreadRunner
-	Migrate          *migrate.Migrate
+	// Migrate          *migrate.Migrate
 }
 
 // hashAssistantRequest prepends sha256 to the description
@@ -192,11 +188,6 @@ func (a *App) Run() error {
 
 type AppDB struct {
 	jsondb *JSONDB
-}
-
-// ProvideAppDB provides an AppDB instance.
-func ProvideAppDB(jsondb *JSONDB) *AppDB {
-	return &AppDB{jsondb}
 }
 
 const (
@@ -927,85 +918,6 @@ func (db *JSONDB) Put(key string, value interface{}) error {
 	return err
 }
 
-// ProvideDB provides a JSONDB instance.
-func ProvideJSONDB(db *sqlx.DB) *JSONDB {
-	return &JSONDB{
-		DB:        db,
-		TableName: "keys",
-	}
-}
-
-// ProvideConfig loads the configuration from the environment.
-func ProvideConfig() (*Config, error) {
-	return goo.ParseConfig[Config]("")
-}
-
-// ProvideArgs parses cli args
-func ProvideArgs() (*Args, error) {
-	return goo.ParseArgs[Args]()
-}
-
-func ProvideOpenAIConfig(cfg *Config) *OpenAIConfig {
-	return &cfg.OpenAI
-}
-
-type OpenAIClientV2 struct {
-	openai.Client
-}
-
-func ProvideOpenAIV2(cfg *Config) *OpenAIClientV2 {
-	ocfg := openai.DefaultConfig(cfg.OpenAI.APIKey)
-	ocfg.AssistantVersion = "v2"
-	oa := openai.NewClientWithConfig(ocfg)
-
-	c := OpenAIClientV2{*oa}
-
-	return &c
-}
-
-func ProvideOpenAI(cfg *Config) *openai.Client {
-	return openai.NewClient(cfg.OpenAI.APIKey)
-}
-
 type OAIClient struct {
 	fetch.Client
 }
-
-func ProvideOAI(cfg *Config) *OAIClient {
-	client := resty.New().SetDebug(true)
-	// client.EnableTrace()
-	return &OAIClient{oai.V2(client, cfg.OpenAI.APIKey)}
-}
-
-func ProvideGooConfig(cfg *Config) *goo.Config {
-	return &cfg.Config
-}
-
-func ProvideSlog() *slog.Logger {
-	// logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	return slog.Default()
-
-}
-
-var wires = wire.NewSet(
-	ProvideGooConfig,
-	goo.Wires,
-	ProvideConfig,
-	ProvideArgs,
-	ProvideOpenAI,
-	ProvideOpenAIV2,
-	ProvideOpenAIConfig,
-	ProvideJSONDB,
-	ProvideAppDB,
-	ProvideSlog,
-	ProvideOAI,
-
-	// ProvideLookupDB,
-	// ProvideOpenAI,
-
-	wire.Struct(new(ThreadManager), "*"),
-	wire.Struct(new(ThreadRunner), "*"),
-	wire.Struct(new(AssistantManager), "*"),
-	wire.Struct(new(RunManager), "*"),
-	wire.Struct(new(App), "*"),
-)

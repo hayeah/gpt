@@ -22,26 +22,34 @@ func InitApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	config, err := ProvideConfig()
+	config, err := ProvideGooConfig()
 	if err != nil {
 		return nil, err
 	}
-	client := ProvideOpenAI(config)
-	openAIClientV2 := ProvideOpenAIV2(config)
-	gooConfig := ProvideGooConfig(config)
+	embeddedMigrateConfig := provideEmbeddedMigrateConfig()
+	embbededMigrate, err := goo.ProvideEmbbededMigrate(embeddedMigrateConfig, config)
+	if err != nil {
+		return nil, err
+	}
 	shutdownContext, err := goo.ProvideShutdownContext()
 	if err != nil {
 		return nil, err
 	}
-	logger, err := goo.ProvideZeroLogger(gooConfig, shutdownContext)
+	logger, err := goo.ProvideZeroLogger(config, shutdownContext)
 	if err != nil {
 		return nil, err
 	}
-	db, err := goo.ProvideSQLX(gooConfig, shutdownContext, logger)
+	db, err := goo.ProvideSQLX(config, shutdownContext, logger)
 	if err != nil {
 		return nil, err
 	}
 	jsondb := ProvideJSONDB(db)
+	gptConfig, err := ProvideConfig(config, embbededMigrate, jsondb)
+	if err != nil {
+		return nil, err
+	}
+	client := ProvideOpenAI(gptConfig)
+	openAIClientV2 := ProvideOpenAIV2(gptConfig)
 	assistantManager := &AssistantManager{
 		OAI:    openAIClientV2,
 		JSONDB: jsondb,
@@ -55,8 +63,8 @@ func InitApp() (*App, error) {
 		oai: openAIClientV2,
 		db:  appDB,
 	}
-	openAIConfig := ProvideOpenAIConfig(config)
-	oaiClient := ProvideOAI(config)
+	openAIConfig := ProvideOpenAIConfig(gptConfig)
+	oaiClient := ProvideOAI(gptConfig)
 	slogLogger := ProvideSlog()
 	threadRunner := &ThreadRunner{
 		OpenAIConfig: openAIConfig,
@@ -67,19 +75,14 @@ func InitApp() (*App, error) {
 		appDB:        appDB,
 		log:          slogLogger,
 	}
-	migrate, err := goo.ProvideMigrate(gooConfig)
-	if err != nil {
-		return nil, err
-	}
 	app := &App{
 		Args:             args,
-		Config:           config,
+		Config:           gptConfig,
 		OAI:              client,
 		AssistantManager: assistantManager,
 		ThreadManager:    threadManager,
 		RunManager:       runManager,
 		ThreadRunner:     threadRunner,
-		Migrate:          migrate,
 	}
 	return app, nil
 }
