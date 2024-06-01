@@ -35,11 +35,11 @@ func InitApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	shutdownContext, err := goo.ProvideShutdownContext()
+	logger, err := goo.ProvideSlog(config)
 	if err != nil {
 		return nil, err
 	}
-	logger, err := goo.ProvideZeroLogger(config, shutdownContext)
+	shutdownContext, err := goo.ProvideShutdownContext(logger)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,6 @@ func InitApp() (*App, error) {
 	}
 	openAIConfig := ProvideOpenAIConfig(gptConfig)
 	oaiClient := ProvideOAI(gptConfig)
-	slogLogger := ProvideSlog()
 	threadRunner := &ThreadRunner{
 		OpenAIConfig: openAIConfig,
 		OAI:          client,
@@ -77,7 +76,7 @@ func InitApp() (*App, error) {
 		AM:           assistantManager,
 		oai:          oaiClient,
 		appDB:        appDB,
-		log:          slogLogger,
+		log:          logger,
 	}
 	app := &App{
 		Args:             args,

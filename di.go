@@ -4,7 +4,6 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path"
 	"strings"
@@ -187,12 +186,6 @@ func ProvideOAI(cfg *Config) *OAIClient {
 	return &OAIClient{OpenAIV2(client, cfg.OpenAI.APIKey)}
 }
 
-func ProvideSlog() *slog.Logger {
-	// logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	return slog.Default()
-
-}
-
 // ProvideAppDB provides an AppDB instance.
 func ProvideAppDB(jsondb *JSONDB) *AppDB {
 	return &AppDB{jsondb}
@@ -208,7 +201,6 @@ var wires = wire.NewSet(
 	ProvideOpenAIConfig,
 	ProvideJSONDB,
 	ProvideAppDB,
-	ProvideSlog,
 	ProvideOAI,
 	provideEmbeddedMigrateConfig,
 	provideAppDir,
