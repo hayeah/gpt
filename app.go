@@ -25,6 +25,7 @@ import (
 type Config struct {
 	goo.Config
 	OpenAI OpenAIConfig
+	AppDir string
 }
 
 type OpenAIConfig struct {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path"
 	"strings"
 	"syscall"
@@ -55,12 +56,39 @@ func provideEmbeddedMigrateConfig() *goo.EmbeddedMigrateConfig {
 	}
 }
 
+type appdir string
+
+func provideAppDir() (appdir, error) {
+	// basecfgdir, err := os.UserConfigDir()
+	// if err != nil {
+	// 	return "", err
+	// }
+	// dir := path.Join(basecfgdir, "github.com/hayeah/gpt")
+
+	basecfgdir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dir := path.Join(basecfgdir, ".github.com/hayeah/gpt")
+
+	err = os.MkdirAll(string(dir), 0755)
+	if err != nil {
+		return "", err
+	}
+
+	return appdir(dir), nil
+}
+
 // ProvideConfig loads the configuration from the environment.
-func ProvideConfig(gcfg *goo.Config, migrate *goo.EmbbededMigrate, jsondb *JSONDB) (*Config, error) {
+func ProvideConfig(appdir appdir, migrate *goo.EmbbededMigrate, jsondb *JSONDB) (*Config, error) {
 	cfg, err := goo.ParseConfig[Config]("")
 	if errors.Is(err, goo.ErrNoConfig) {
 		cfg = &Config{}
 		err = nil
+	}
+
+	if cfg.AppDir == "" {
+		cfg.AppDir = string(appdir)
 	}
 
 	if err != nil {
@@ -104,7 +132,7 @@ func ProvideConfig(gcfg *goo.Config, migrate *goo.EmbbededMigrate, jsondb *JSOND
 	return cfg, nil
 }
 
-func ProvideGooConfig() (*goo.Config, error) {
+func ProvideGooConfig(appdir appdir) (*goo.Config, error) {
 	cfg, err := goo.ParseConfig[goo.Config]("")
 	if errors.Is(err, goo.ErrNoConfig) {
 		cfg = &goo.Config{}
@@ -114,9 +142,7 @@ func ProvideGooConfig() (*goo.Config, error) {
 
 	if cfg.Database == nil {
 		cfg.Database = &goo.DatabaseConfig{}
-
-		datadir := "."
-		dbfile := path.Join(datadir, "gpt.sqlite3")
+		dbfile := path.Join(string(appdir), "gpt.sqlite3")
 
 		cfg.Database.Dialect = "sqlite3"
 		cfg.Database.DSN = dbfile
@@ -186,6 +212,7 @@ var wires = wire.NewSet(
 	ProvideSlog,
 	ProvideOAI,
 	provideEmbeddedMigrateConfig,
+	provideAppDir,
 
 	wire.Struct(new(ThreadManager), "*"),
 	wire.Struct(new(ThreadRunner), "*"),

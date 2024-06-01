@@ -22,11 +22,15 @@ func InitApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	config, err := ProvideGooConfig()
+	gptAppdir, err := provideAppDir()
 	if err != nil {
 		return nil, err
 	}
 	embeddedMigrateConfig := provideEmbeddedMigrateConfig()
+	config, err := ProvideGooConfig(gptAppdir)
+	if err != nil {
+		return nil, err
+	}
 	embbededMigrate, err := goo.ProvideEmbbededMigrate(embeddedMigrateConfig, config)
 	if err != nil {
 		return nil, err
@@ -44,7 +48,7 @@ func InitApp() (*App, error) {
 		return nil, err
 	}
 	jsondb := ProvideJSONDB(db)
-	gptConfig, err := ProvideConfig(config, embbededMigrate, jsondb)
+	gptConfig, err := ProvideConfig(gptAppdir, embbededMigrate, jsondb)
 	if err != nil {
 		return nil, err
 	}
