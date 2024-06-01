@@ -1,1 +1,1 @@
-DROP TABLE IF EXISTS assistants;
+DROP TABLE IF EXISTS keys;
