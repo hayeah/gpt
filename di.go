@@ -12,7 +12,6 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/google/wire"
-	"github.com/hayeah/go-gpt/oai"
 	"github.com/hayeah/goo"
 	"github.com/jmoiron/sqlx"
 	"github.com/sashabaranov/go-openai"
@@ -185,7 +184,7 @@ func ProvideOpenAI(cfg *Config) *openai.Client {
 func ProvideOAI(cfg *Config) *OAIClient {
 	client := resty.New().SetDebug(true)
 	// client.EnableTrace()
-	return &OAIClient{oai.V2(client, cfg.OpenAI.APIKey)}
+	return &OAIClient{OpenAIV2(client, cfg.OpenAI.APIKey)}
 }
 
 func ProvideSlog() *slog.Logger {

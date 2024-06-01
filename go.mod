@@ -1,4 +1,4 @@
-module github.com/hayeah/go-gpt
+module github.com/hayeah/gpt
 
 go 1.22.2
 

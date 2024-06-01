@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/hayeah/go-gpt"
+	"github.com/hayeah/gpt"
 )
 
 func main() {
