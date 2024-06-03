@@ -3,6 +3,6 @@
   "name": "gpt3.5",
   "description": "A base gpt3.5 assistant",
   "metadata": {
-    "foo": 42
+    "author": "hayeah"
   }
 }
