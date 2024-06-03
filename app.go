@@ -6,11 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
-	"slices"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/hayeah/goo"
 	"github.com/hayeah/goo/fetch"
 	"github.com/sashabaranov/go-openai"
@@ -88,7 +84,7 @@ func (a *App) Run() error {
 	case args.Send != nil:
 		cmd := *args.Send
 		// return a.ThreadRunner.RunStream(cmd)
-		return a.ThreadRunner.RunStream2(cmd)
+		return a.ThreadRunner.RunStream(cmd)
 	case args.Run != nil:
 		switch {
 		case args.Run.Show != nil:
@@ -131,39 +127,6 @@ func (d *AppDB) CurrentRunID() (string, error) {
 func (d *AppDB) PutCurrentRun(id string) error {
 	return d.jsondb.Put(keyCurrentRun, id)
 }
-
-type ToolCaller interface {
-	Exec(call *openai.FunctionCall) (string, error)
-}
-
-type CommandCaller struct {
-	Program string
-}
-
-func (c *CommandCaller) Exec(name, args string) (string, int, error) {
-	cmd := exec.Command("sh", "-c", c.Program)
-	// cmd := exec.Command("python3", "eval.py")
-
-	// NOTE: env vars are NAME=VALUE strings, where VALUE is a null terminated
-	// string. No escape is necessary.
-	//
-	// See:
-	// https://man7.org/linux/man-pages/man7/environ.7.html
-	cmd.Env = append(os.Environ(), "TOOL_NAME="+name, "TOOL_ARGS="+args)
-
-	out, err := cmd.CombinedOutput()
-	exitCode := cmd.ProcessState.ExitCode()
-
-	return string(out), exitCode, err
-
-}
-
-// func handleFunctionCall(call *openai.FunctionCall) (string, error) {
-// 	fmt.Println("Function:", call.Name)
-// 	fmt.Println("Arguments:", call.Arguments)
-
-// 	return "1.7724538509055159", nil
-// }
 
 type RunManager struct {
 	oai *OpenAIClientV2
@@ -208,65 +171,6 @@ func (rm *RunManager) ListSteps() error {
 	}
 
 	goo.PrintJSON(steps)
-
-	return nil
-}
-
-type ThreadManager struct {
-	OAI *OpenAIClientV2
-	db  *AppDB
-}
-
-// Use selects a thread
-func (tm *ThreadManager) Use(threadID string) error {
-	return tm.db.PutCurrentThreadID(threadID)
-}
-
-// Show retrieves thread info
-func (tm *ThreadManager) Show(threadID string) error {
-	var err error
-	if threadID == "" {
-		threadID, err = tm.db.CurrentThreadID()
-		if err != nil {
-			return err
-		}
-
-	}
-
-	thread, err := tm.OAI.RetrieveThread(context.Background(), threadID)
-	if err != nil {
-		return err
-	}
-
-	goo.PrintJSON(thread)
-
-	return nil
-}
-
-// Messages retrieves messages from the current thread
-func (tm *ThreadManager) Messages() error {
-	threadID, err := tm.db.CurrentThreadID()
-	if err != nil {
-		return err
-	}
-
-	list, err := tm.OAI.ListMessage(context.Background(), threadID, nil, nil, nil, nil)
-	if err != nil {
-		return err
-	}
-
-	// slices.Reverse()
-	slices.Reverse(list.Messages)
-
-	for _, msg := range list.Messages {
-		spew.Dump(msg.Role)
-		for _, content := range msg.Content {
-			if content.Text != nil {
-				fmt.Print(content.Text.Value)
-			}
-		}
-		fmt.Println()
-	}
 
 	return nil
 }

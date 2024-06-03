@@ -6,26 +6,21 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
+	"slices"
 
+	"github.com/davecgh/go-spew/spew"
+	"github.com/hayeah/goo"
 	"github.com/hayeah/goo/fetch"
 	"github.com/sashabaranov/go-openai"
 )
 
 type ThreadRunner struct {
-	OpenAIConfig *OpenAIConfig
-	OAI          *openai.Client
-	OAIV2        *OpenAIClientV2
-	AM           *AssistantManager
+	AM *AssistantManager
 
-	oai *OAIClient
-
+	oai   *OAIClient
 	appDB *AppDB
 	log   *slog.Logger
-}
-
-type createRunRequest struct {
-	AssistantID string
-	Message     string
 }
 
 func (tr *ThreadRunner) processInputs(inputs []string) ([]json.Marshaler, error) {
@@ -46,7 +41,7 @@ func (tr *ThreadRunner) processInputs(inputs []string) ([]json.Marshaler, error)
 	return ms, nil
 }
 
-func (tr *ThreadRunner) RunStream2(cmd SendCmdScope) error {
+func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
 	ai := tr.oai
 
 	ms, err := tr.processInputs(cmd.Inputs)
@@ -262,182 +257,87 @@ processStream:
 	return sse.Err()
 }
 
-var createThreadAndRunTemplate = MustJSONStructTemplate[openai.CreateThreadAndRunRequest, createRunRequest](`{
-	"assistant_id": "{{.AssistantID}}",
-	"thread": {
-		"messages": [
-			{"role": "user", "content": "{{.Message}}"}
-		]
+type ThreadManager struct {
+	OAI *OpenAIClientV2
+	db  *AppDB
+}
+
+// Use selects a thread
+func (tm *ThreadManager) Use(threadID string) error {
+	return tm.db.PutCurrentThreadID(threadID)
+}
+
+// Show retrieves thread info
+func (tm *ThreadManager) Show(threadID string) error {
+	var err error
+	if threadID == "" {
+		threadID, err = tm.db.CurrentThreadID()
+		if err != nil {
+			return err
+		}
+
 	}
-}`)
 
-var createRunTemplate = MustJSONStructTemplate[openai.RunRequest, createRunRequest](`{
-	"assistant_id": "{{.AssistantID}}",
-	"additional_messages": [
-		{"role": "user", "content": "{{.Message}}"}
-	]
-}`)
-
-func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
-
-	oa := tr.OAIV2
-	ctx := context.Background()
-
-	log := tr.log
-
-	assistantID, err := tr.AM.CurrentAssistantID()
+	thread, err := tm.OAI.RetrieveThread(context.Background(), threadID)
 	if err != nil {
 		return err
 	}
 
-	var threadID string
-	if cmd.ContinueThread {
-		threadID, err = tr.appDB.CurrentThreadID()
+	goo.PrintJSON(thread)
 
-		if err != nil {
-			return err
-		}
-	}
+	return nil
+}
 
-	var stream *openai.StreamerV2
-	if threadID != "" {
-		runReq, err := createRunTemplate.Execute(createRunRequest{
-			AssistantID: assistantID,
-			Message:     cmd.Message,
-		})
-		if err != nil {
-			return err
-		}
-
-		stream, err = oa.CreateRunStream(ctx, threadID, *runReq)
-		if err != nil {
-			return err
-		}
-	} else {
-		threadRunReq, err := createThreadAndRunTemplate.Execute(createRunRequest{
-			AssistantID: assistantID,
-			Message:     cmd.Message,
-		})
-		if err != nil {
-			return err
-		}
-
-		stream, err = oa.CreateThreadAndRunStream(ctx, *threadRunReq)
-		if err != nil {
-			return err
-		}
-	}
-
-	defer stream.Close()
-
-	outf, err := os.Create("stream.sse")
+// Messages retrieves messages from the current thread
+func (tm *ThreadManager) Messages() error {
+	threadID, err := tm.db.CurrentThreadID()
 	if err != nil {
 		return err
 	}
-	defer outf.Close()
 
-processStream:
-	stream.TeeSSE(outf)
-
-	toolw := os.Stderr
-
-	for stream.Next() {
-		// process text delta
-		text, ok := stream.MessageDeltaText()
-		if ok {
-			fmt.Fprint(os.Stdout, text)
-			// fmt.Println(text)
-			continue
-		}
-
-		// process everything else
-
-		event := stream.Event()
-		switch event := event.(type) {
-		case *openai.StreamThreadCreated:
-			err = tr.appDB.PutCurrentThreadID(event.Thread.ID)
-			if err != nil {
-				return err
-			}
-		case *openai.StreamThreadRunCreated:
-			err = tr.appDB.PutCurrentRun(event.Run.ID)
-			if err != nil {
-				return err
-			}
-		case *openai.StreamRunStepDelta:
-			for _, tc := range event.RunStepDelta.Delta.StepDetails.ToolCalls {
-				switch {
-				case tc.Function.Name != "":
-					toolw.WriteString("\n")
-					log.Info("FunctionCall", "name", tc.Function.Name)
-				case tc.Function.Arguments != "":
-					toolw.WriteString(tc.Function.Arguments)
-				}
-
-				// code, err := PartialDecodeCodeArguments(buf.Bytes())
-				// if err == nil {
-				// 	newCode := code[len(lastCode):]
-				// 	lastCode = code
-				// 	fmt.Print(newCode)
-				// }
-			}
-
-		case *openai.StreamThreadRunRequiresAction:
-			toolw.WriteString("\n")
-			toolw.Sync()
-
-			if cmd.Tools == "" {
-				return fmt.Errorf("--tools is required to handle tool calls")
-			}
-
-			var toolOutputs []openai.ToolOutput
-			for _, tc := range event.Run.RequiredAction.SubmitToolOutputs.ToolCalls {
-				caller := CommandCaller{Program: cmd.Tools}
-
-				log.Info("FunctionCall.Exec", "name", tc.Function.Name, "cmd", cmd.Tools)
-
-				name := tc.Function.Name
-				args := tc.Function.Arguments
-
-				output, exitcode, err := caller.Exec(name, args)
-
-				// TODO: print exit status
-				if err != nil {
-					// TODO submit error to the assistant?
-					output = fmt.Sprintf("Execute error: %v\n%s\n", err, output)
-				}
-
-				output = fmt.Sprintf("%s\nProgram exit code: %d\n", output, exitcode)
-
-				toolw.WriteString(output)
-
-				toolOutputs = append(toolOutputs, openai.ToolOutput{
-					ToolCallID: tc.ID,
-					Output:     output,
-				})
-			}
-
-			submitOutputs := openai.SubmitToolOutputsRequest{
-				ToolOutputs: toolOutputs,
-			}
-
-			// RequiresAction is the last event before DONE. Close the previous
-			// stream before starting the new tool outputs stream.
-			stream.Next() // consume the DONE event, for completion's sake
-			stream.Close()
-
-			// start a new submit stream
-			stream, err = oa.SubmitToolOutputsStream(ctx, event.ThreadID, event.Run.ID, submitOutputs)
-			if err != nil {
-				return err
-			}
-
-			goto processStream
-		case *openai.StreamThreadRunCompleted:
-			// TODO: print tokens usage
-			fmt.Println("")
-		}
+	list, err := tm.OAI.ListMessage(context.Background(), threadID, nil, nil, nil, nil)
+	if err != nil {
+		return err
 	}
 
-	return err
+	// slices.Reverse()
+	slices.Reverse(list.Messages)
+
+	for _, msg := range list.Messages {
+		spew.Dump(msg.Role)
+		for _, content := range msg.Content {
+			if content.Text != nil {
+				fmt.Print(content.Text.Value)
+			}
+		}
+		fmt.Println()
+	}
+
+	return nil
+}
+
+type ToolCaller interface {
+	Exec(call *openai.FunctionCall) (string, error)
+}
+
+type CommandCaller struct {
+	Program string
+}
+
+func (c *CommandCaller) Exec(name, args string) (string, int, error) {
+	cmd := exec.Command("sh", "-c", c.Program)
+	// cmd := exec.Command("python3", "eval.py")
+
+	// NOTE: env vars are NAME=VALUE strings, where VALUE is a null terminated
+	// string. No escape is necessary.
+	//
+	// See:
+	// https://man7.org/linux/man-pages/man7/environ.7.html
+	cmd.Env = append(os.Environ(), "TOOL_NAME="+name, "TOOL_ARGS="+args)
+
+	out, err := cmd.CombinedOutput()
+	exitCode := cmd.ProcessState.ExitCode()
+
+	return string(out), exitCode, err
+
 }

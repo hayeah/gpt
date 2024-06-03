@@ -67,16 +67,12 @@ func InitApp() (*App, error) {
 		oai: openAIClientV2,
 		db:  appDB,
 	}
-	openAIConfig := ProvideOpenAIConfig(gptConfig)
 	oaiClient := ProvideOAI(gptConfig)
 	threadRunner := &ThreadRunner{
-		OpenAIConfig: openAIConfig,
-		OAI:          client,
-		OAIV2:        openAIClientV2,
-		AM:           assistantManager,
-		oai:          oaiClient,
-		appDB:        appDB,
-		log:          logger,
+		AM:    assistantManager,
+		oai:   oaiClient,
+		appDB: appDB,
+		log:   logger,
 	}
 	app := &App{
 		Args:             args,
