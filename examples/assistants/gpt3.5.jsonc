@@ -1,0 +1,8 @@
+{
+  "model": "gpt-3.5-turbo",
+  "name": "gpt3.5",
+  "description": "A base gpt3.5 assistant",
+  "metadata": {
+    "foo": 42
+  }
+}

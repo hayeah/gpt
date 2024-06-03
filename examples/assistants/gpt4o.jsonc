@@ -1,0 +1,8 @@
+{
+  "model": "gpt-4o",
+  "name": "gpt4o",
+  "description": "A base gpt4o assistant",
+  "metadata": {
+    "author": "hayeah"
+  }
+}

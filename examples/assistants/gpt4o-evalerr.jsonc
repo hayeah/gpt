@@ -1,0 +1,29 @@
+{
+  "model": "gpt-4o",
+  "name": "gpt4o eval w/ error",
+  "description": "gpt4o assistant with eval py with error",
+  "metadata": {
+    "author": "hayeah"
+  },
+  // Note: even though tool use is expected to output JSON, the model itself need to be told
+  // to output JSON, otherwise it might output the code in plain text.
+  "instructions": "- Tool use MUST output JSON.\n- The first coding attempt MUST have a typo, and upon receiving the error message, fix it and try again.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "evalPython",
+        "description": "Evaluate a Python program. The code MUST print output. The code MUST use stdlib only.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "the program code."
+            }
+          }
+        }
+      }
+    }
+  ]
+}
