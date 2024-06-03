@@ -1,7 +1,6 @@
 package gpt
 
 import (
-	"github.com/hayeah/goo/fetch"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -98,8 +97,4 @@ func (d *AppDB) CurrentRunID() (string, error) {
 // PutCurrentRun sets the current run ID.
 func (d *AppDB) PutCurrentRun(id string) error {
 	return d.jsondb.Put(keyCurrentRun, id)
-}
-
-type OAIClient struct {
-	fetch.Client
 }

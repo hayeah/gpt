@@ -12,6 +12,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/google/wire"
 	"github.com/hayeah/goo"
+	"github.com/hayeah/goo/fetch"
 	"github.com/jmoiron/sqlx"
 	"github.com/sashabaranov/go-openai"
 	"golang.org/x/term"
@@ -188,6 +189,10 @@ func ProvideOpenAIV2(cfg *Config) *OpenAIClientV2 {
 
 func ProvideOpenAI(cfg *Config) *openai.Client {
 	return openai.NewClient(cfg.OpenAI.APIKey)
+}
+
+type OAIClient struct {
+	fetch.Client
 }
 
 func ProvideOAI(cfg *Config) *OAIClient {
