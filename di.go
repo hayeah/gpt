@@ -20,6 +20,16 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+type Config struct {
+	goo.Config
+	OpenAI OpenAIConfig
+	AppDir string
+}
+
+type OpenAIConfig struct {
+	APIKey string
+}
+
 // ProvideDB provides a JSONDB instance.
 func ProvideJSONDB(db *sqlx.DB) *JSONDB {
 	return &JSONDB{
