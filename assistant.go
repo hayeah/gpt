@@ -1,18 +1,15 @@
 package gpt
 
 import (
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
+	"net/http"
 
 	"github.com/hayeah/goo"
-	"github.com/sashabaranov/go-openai"
+	"github.com/hayeah/goo/fetch"
 )
 
 type AssistantManager struct {
-	OAI    *OpenAIClientV2
+	oai    *OpenAIV2API
 	JSONDB *JSONDB
 }
 
@@ -26,53 +23,79 @@ func (am *AssistantManager) Show(assistantID string) error {
 		}
 	}
 
-	assistant, err := am.OAI.RetrieveAssistant(context.Background(), assistantID)
+	oai := am.oai
+	// https://platform.openai.com/docs/api-reference/assistants/getAssistant
+	// GET https://api.openai.com/v1/assistants/{assistant_id}
+
+	r, err := oai.GetJSON("/assistants/{{.}}", &fetch.Options{
+		PathParams: assistantID,
+	})
+
 	if err != nil {
 		return err
 	}
 
-	goo.PrintJSON(assistant)
+	if r.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", r.StatusCode)
+	}
+
+	fmt.Println(r)
 
 	return nil
 
 }
 
 func (am *AssistantManager) List() error {
-	as, err := am.OAI.ListAssistants(context.Background(), nil, nil, nil, nil)
+	// https://platform.openai.com/docs/api-reference/assistants/listAssistants
+	// GET https://api.openai.com/v1/assistants
+
+	oai := am.oai
+	r, err := oai.GetJSON("/assistants", nil)
+
 	if err != nil {
 		return err
 	}
 
-	goo.PrintJSON(as)
+	if r.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", r.StatusCode)
+	}
+
+	fmt.Println(r)
 
 	return nil
 }
 
-func (am *AssistantManager) Create(filePath string) error {
-	var aReq openai.AssistantRequest
-	err := goo.DecodeFile(filePath, &aReq)
+func (am *AssistantManager) Create(dataURL string) error {
+	var assistantRequest any
+	err := goo.DecodeURL(dataURL, &assistantRequest)
 	if err != nil {
 		return err
 	}
 
-	err = hashAssistantRequest(&aReq)
+	oai := am.oai
+
+	// POST https://api.openai.com/v1/assistants
+
+	r, err := oai.JSON("/assistants", &fetch.Options{
+		Body: assistantRequest,
+	})
+
 	if err != nil {
 		return err
 	}
 
-	oai := am.OAI
-
-	ctx := context.Background()
-
-	assistant, err := oai.CreateAssistant(ctx, aReq)
-	if err != nil {
-		return err
+	if r.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", r.StatusCode)
 	}
 
-	goo.PrintJSON(assistant)
+	fmt.Println(r)
 
-	return am.JSONDB.Put("currentAssistant", assistant.ID)
-	// return nil
+	assistantID := r.Get("id").String()
+	if assistantID != "" {
+		am.JSONDB.Put("currentAssistant", assistantID)
+	}
+
+	return nil
 }
 
 // Use selects an assistant
@@ -94,22 +117,22 @@ func (am *AssistantManager) CurrentAssistantID() (string, error) {
 }
 
 // hashAssistantRequest prepends sha256 to the description
-func hashAssistantRequest(aReq *openai.AssistantRequest) error {
-	aReqJSON, err := json.Marshal(aReq)
-	if err != nil {
-		return err
-	}
+// func hashAssistantRequest(aReq *openai.AssistantRequest) error {
+// 	aReqJSON, err := json.Marshal(aReq)
+// 	if err != nil {
+// 		return err
+// 	}
 
-	hashed := sha256.Sum256(aReqJSON)
+// 	hashed := sha256.Sum256(aReqJSON)
 
-	metadata := aReq.Metadata
+// 	metadata := aReq.Metadata
 
-	if metadata == nil {
-		metadata = make(map[string]interface{})
-		aReq.Metadata = metadata
-	}
+// 	if metadata == nil {
+// 		metadata = make(map[string]interface{})
+// 		aReq.Metadata = metadata
+// 	}
 
-	metadata["__hash__"] = hex.EncodeToString(hashed[:])
+// 	metadata["__hash__"] = hex.EncodeToString(hashed[:])
 
-	return nil
-}
+// 	return nil
+// }

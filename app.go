@@ -1,13 +1,8 @@
 package gpt
 
-import (
-	"github.com/sashabaranov/go-openai"
-)
-
 type App struct {
 	Args             *Args
 	Config           *Config
-	OAI              *openai.Client
 	AssistantManager *AssistantManager
 	ThreadManager    *ThreadManager
 	RunManager       *RunManager

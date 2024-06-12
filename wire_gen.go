@@ -52,32 +52,28 @@ func InitApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := ProvideOpenAI(gptConfig)
-	openAIClientV2 := ProvideOpenAIV2(gptConfig)
+	openAIV2API := ProvideOAI(gptConfig)
 	assistantManager := &AssistantManager{
-		OAI:    openAIClientV2,
+		oai:    openAIV2API,
 		JSONDB: jsondb,
 	}
 	appDB := ProvideAppDB(jsondb)
 	threadManager := &ThreadManager{
-		OAI: openAIClientV2,
-		db:  appDB,
+		db: appDB,
 	}
 	runManager := &RunManager{
-		oai: openAIClientV2,
-		db:  appDB,
+		ai: openAIV2API,
+		db: appDB,
 	}
-	oaiClient := ProvideOAI(gptConfig)
 	threadRunner := &ThreadRunner{
 		AM:    assistantManager,
-		oai:   oaiClient,
+		oai:   openAIV2API,
 		appDB: appDB,
 		log:   logger,
 	}
 	app := &App{
 		Args:             args,
 		Config:           gptConfig,
-		OAI:              client,
 		AssistantManager: assistantManager,
 		ThreadManager:    threadManager,
 		RunManager:       runManager,

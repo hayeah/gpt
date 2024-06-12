@@ -9,12 +9,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/go-resty/resty/v2"
 	"github.com/google/wire"
 	"github.com/hayeah/goo"
-	"github.com/hayeah/goo/fetch"
 	"github.com/jmoiron/sqlx"
-	"github.com/sashabaranov/go-openai"
 	"golang.org/x/term"
 
 	_ "github.com/golang-migrate/migrate/v4/database/sqlite3"
@@ -173,32 +170,8 @@ func ProvideOpenAIConfig(cfg *Config) *OpenAIConfig {
 	return &cfg.OpenAI
 }
 
-type OpenAIClientV2 struct {
-	openai.Client
-}
-
-func ProvideOpenAIV2(cfg *Config) *OpenAIClientV2 {
-	ocfg := openai.DefaultConfig(cfg.OpenAI.APIKey)
-	ocfg.AssistantVersion = "v2"
-	oa := openai.NewClientWithConfig(ocfg)
-
-	c := OpenAIClientV2{*oa}
-
-	return &c
-}
-
-func ProvideOpenAI(cfg *Config) *openai.Client {
-	return openai.NewClient(cfg.OpenAI.APIKey)
-}
-
-type OAIClient struct {
-	fetch.Client
-}
-
-func ProvideOAI(cfg *Config) *OAIClient {
-	client := resty.New().SetDebug(true)
-	// client.EnableTrace()
-	return &OAIClient{OpenAIV2(client, cfg.OpenAI.APIKey)}
+func ProvideOAI(cfg *Config) *OpenAIV2API {
+	return NewOpenAIV2API(cfg.OpenAI.APIKey)
 }
 
 // ProvideAppDB provides an AppDB instance.
@@ -211,8 +184,6 @@ var wires = wire.NewSet(
 	goo.Wires,
 	ProvideConfig,
 	ProvideArgs,
-	ProvideOpenAI,
-	ProvideOpenAIV2,
 	ProvideOpenAIConfig,
 	ProvideJSONDB,
 	ProvideAppDB,

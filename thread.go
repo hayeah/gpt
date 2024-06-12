@@ -1,16 +1,12 @@
 package gpt
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
-	"slices"
 
-	"github.com/davecgh/go-spew/spew"
-	"github.com/hayeah/goo"
 	"github.com/hayeah/goo/fetch"
 	"github.com/sashabaranov/go-openai"
 )
@@ -18,7 +14,7 @@ import (
 type ThreadRunner struct {
 	AM *AssistantManager
 
-	oai   *OAIClient
+	oai   *OpenAIV2API
 	appDB *AppDB
 	log   *slog.Logger
 }
@@ -68,7 +64,7 @@ func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
 	if threadID == "" {
 		// https://platform.openai.com/docs/api-reference/runs/createThreadAndRun
 		// POST https://api.openai.com/v1/threads/{thread_id}/runs
-		sse, err = ai.SSE("POST", "/threads/runs", &fetch.Options{
+		sse, err = ai.SSE("/threads/runs", &fetch.Options{
 			Body: `{
 				"assistant_id": {{assistantID}},
 				"thread": {
@@ -90,7 +86,7 @@ func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
 	} else {
 		// https://platform.openai.com/docs/api-reference/runs/createRun
 		// POST https://api.openai.com/v1/threads/{thread_id}/runs
-		sse, err = ai.SSE("POST", "/threads/{thread_id}/runs", &fetch.Options{
+		sse, err = ai.SSE("/threads/{{thread_id}}/runs", &fetch.Options{
 			Body: `{
 				"assistant_id": {{assistantID}},
 
@@ -122,7 +118,7 @@ func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
 	defer sse.Close()
 
 	if sse.IsError() {
-		return fmt.Errorf("POST /threads/run error: %s\n%s", sse.Status(), sse.String())
+		return fmt.Errorf("POST /threads/run error: %s", sse.Status)
 	}
 
 	f, err := os.Create("stream.sse")
@@ -224,7 +220,7 @@ processStream:
 			// POST https://api.openai.com/v1/threads/{thread_id}/runs/{run_id}/submit_tool_outputs
 
 			// start a new submit stream
-			sse, err = ai.SSE("POST", "/threads/{thread_id}/runs/{run_id}/submit_tool_outputs", &fetch.Options{
+			sse, err = ai.SSE("/threads/{{thread_id}}/runs/{{run_id}}/submit_tool_outputs", &fetch.Options{
 				Body: `{
 						"tool_outputs": {{tool_outputs}},
 						"stream": true,
@@ -258,8 +254,7 @@ processStream:
 }
 
 type ThreadManager struct {
-	OAI *OpenAIClientV2
-	db  *AppDB
+	db *AppDB
 }
 
 // Use selects a thread
@@ -269,49 +264,49 @@ func (tm *ThreadManager) Use(threadID string) error {
 
 // Show retrieves thread info
 func (tm *ThreadManager) Show(threadID string) error {
-	var err error
-	if threadID == "" {
-		threadID, err = tm.db.CurrentThreadID()
-		if err != nil {
-			return err
-		}
+	// var err error
+	// if threadID == "" {
+	// 	threadID, err = tm.db.CurrentThreadID()
+	// 	if err != nil {
+	// 		return err
+	// 	}
 
-	}
+	// }
 
-	thread, err := tm.OAI.RetrieveThread(context.Background(), threadID)
-	if err != nil {
-		return err
-	}
+	// thread, err := tm.OAI.RetrieveThread(context.Background(), threadID)
+	// if err != nil {
+	// 	return err
+	// }
 
-	goo.PrintJSON(thread)
+	// goo.PrintJSON(thread)
 
 	return nil
 }
 
 // Messages retrieves messages from the current thread
 func (tm *ThreadManager) Messages() error {
-	threadID, err := tm.db.CurrentThreadID()
-	if err != nil {
-		return err
-	}
+	// threadID, err := tm.db.CurrentThreadID()
+	// if err != nil {
+	// 	return err
+	// }
 
-	list, err := tm.OAI.ListMessage(context.Background(), threadID, nil, nil, nil, nil)
-	if err != nil {
-		return err
-	}
+	// list, err := tm.OAI.ListMessage(context.Background(), threadID, nil, nil, nil, nil)
+	// if err != nil {
+	// 	return err
+	// }
 
-	// slices.Reverse()
-	slices.Reverse(list.Messages)
+	// // slices.Reverse()
+	// slices.Reverse(list.Messages)
 
-	for _, msg := range list.Messages {
-		spew.Dump(msg.Role)
-		for _, content := range msg.Content {
-			if content.Text != nil {
-				fmt.Print(content.Text.Value)
-			}
-		}
-		fmt.Println()
-	}
+	// for _, msg := range list.Messages {
+	// 	spew.Dump(msg.Role)
+	// 	for _, content := range msg.Content {
+	// 		if content.Text != nil {
+	// 			fmt.Print(content.Text.Value)
+	// 		}
+	// 	}
+	// 	fmt.Println()
+	// }
 
 	return nil
 }

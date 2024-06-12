@@ -1,16 +1,23 @@
 package gpt
 
 import (
-	"github.com/go-resty/resty/v2"
+	"net/http"
+
 	"github.com/hayeah/goo/fetch"
 )
 
-func OpenAIV2(client *resty.Client, secret string) fetch.Client {
-	c := fetch.New(client)
-	c.SetBaseURL("https://api.openai.com/v1")
-	c.SetHeader("Content-Type", "application/json")
-	c.SetHeader("OpenAI-Beta", "assistants=v2")
-	c.SetAuthToken(secret)
+type OpenAIV2API struct {
+	fetch.Options
+}
 
-	return c
+func NewOpenAIV2API(secret string) *OpenAIV2API {
+	opts := fetch.Options{
+		Method:  http.MethodPost,
+		BaseURL: "https://api.openai.com/v1",
+	}
+	opts.SetHeader("Content-Type", "application/json")
+	opts.SetHeader("OpenAI-Beta", "assistants=v2")
+	opts.SetHeader("Authorization", "Bearer "+secret)
+
+	return &OpenAIV2API{opts}
 }
