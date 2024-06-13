@@ -64,7 +64,7 @@ func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
 	if threadID == "" {
 		// https://platform.openai.com/docs/api-reference/runs/createThreadAndRun
 		// POST https://api.openai.com/v1/threads/{thread_id}/runs
-		sse, err = ai.SSE("/threads/runs", &fetch.Options{
+		sse, err = ai.SSE("POST", "/threads/runs", &fetch.Options{
 			Body: `{
 				"assistant_id": {{assistantID}},
 				"thread": {
@@ -86,7 +86,7 @@ func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
 	} else {
 		// https://platform.openai.com/docs/api-reference/runs/createRun
 		// POST https://api.openai.com/v1/threads/{thread_id}/runs
-		sse, err = ai.SSE("/threads/{{thread_id}}/runs", &fetch.Options{
+		sse, err = ai.SSE("POST", "/threads/{{thread_id}}/runs", &fetch.Options{
 			Body: `{
 				"assistant_id": {{assistantID}},
 
@@ -116,10 +116,6 @@ func (tr *ThreadRunner) RunStream(cmd SendCmdScope) error {
 		return err
 	}
 	defer sse.Close()
-
-	if sse.IsError() {
-		return fmt.Errorf("POST /threads/run error: %s", sse.Status)
-	}
 
 	f, err := os.Create("stream.sse")
 	if err != nil {
@@ -220,7 +216,7 @@ processStream:
 			// POST https://api.openai.com/v1/threads/{thread_id}/runs/{run_id}/submit_tool_outputs
 
 			// start a new submit stream
-			sse, err = ai.SSE("/threads/{{thread_id}}/runs/{{run_id}}/submit_tool_outputs", &fetch.Options{
+			sse, err = ai.SSE("POST", "/threads/{{thread_id}}/runs/{{run_id}}/submit_tool_outputs", &fetch.Options{
 				Body: `{
 						"tool_outputs": {{tool_outputs}},
 						"stream": true,
@@ -243,8 +239,8 @@ processStream:
 		case "thread.run.step.completed":
 			fmt.Print("\n")
 			// NB: multipath doesn't work if there are spaces between the commas
-			result := event.GJSON("{thread_id,id,usage}")
-			fmt.Println(result)
+			// result := event.GJSON("{thread_id,id,usage}")
+			// fmt.Println(result)
 		case "done":
 			fmt.Print("\n")
 		}

@@ -2,7 +2,6 @@ package gpt
 
 import (
 	"fmt"
-	"net/http"
 
 	"github.com/hayeah/goo/fetch"
 )
@@ -44,17 +43,12 @@ func (rm *RunManager) Show() error {
 
 	// https://platform.openai.com/docs/api-reference/runs/getRun
 	// https://api.openai.com/v1/threads/{thread_id}/runs/{run_id}
-	r, err := oai.JSON("/threads/{{ThreadID}}/runs/{{RunID}}", &fetch.Options{
-		Method:     http.MethodGet,
+	r, err := oai.JSON("GET", "/threads/{{ThreadID}}/runs/{{RunID}}", &fetch.Options{
 		PathParams: pathParams,
 	})
 
 	if err != nil {
 		return err
-	}
-
-	if r.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", r.StatusCode)
 	}
 
 	fmt.Println(r)
@@ -71,17 +65,12 @@ func (rm *RunManager) ListSteps() error {
 
 	// https://platform.openai.com/docs/api-reference/run-steps/listRunSteps
 	// https://api.openai.com/v1/threads/{thread_id}/runs/{run_id}/steps
-	r, err := oai.JSON("/threads/{{ThreadID}}/runs/{{RunID}}/steps", &fetch.Options{
-		Method:     http.MethodGet,
+	r, err := oai.JSON("GET", "/threads/{{ThreadID}}/runs/{{RunID}}/steps", &fetch.Options{
 		PathParams: pathParams,
 	})
 
 	if err != nil {
 		return err
-	}
-
-	if r.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", r.StatusCode)
 	}
 
 	fmt.Println(r)

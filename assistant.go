@@ -2,7 +2,6 @@ package gpt
 
 import (
 	"fmt"
-	"net/http"
 
 	"github.com/hayeah/goo"
 	"github.com/hayeah/goo/fetch"
@@ -27,16 +26,12 @@ func (am *AssistantManager) Show(assistantID string) error {
 	// https://platform.openai.com/docs/api-reference/assistants/getAssistant
 	// GET https://api.openai.com/v1/assistants/{assistant_id}
 
-	r, err := oai.GetJSON("/assistants/{{.}}", &fetch.Options{
+	r, err := oai.JSON("GET", "/assistants/{{.}}", &fetch.Options{
 		PathParams: assistantID,
 	})
 
 	if err != nil {
 		return err
-	}
-
-	if r.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", r.StatusCode)
 	}
 
 	fmt.Println(r)
@@ -50,14 +45,10 @@ func (am *AssistantManager) List() error {
 	// GET https://api.openai.com/v1/assistants
 
 	oai := am.oai
-	r, err := oai.GetJSON("/assistants", nil)
+	r, err := oai.JSON("GET", "/assistants", nil)
 
 	if err != nil {
 		return err
-	}
-
-	if r.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", r.StatusCode)
 	}
 
 	fmt.Println(r)
@@ -75,17 +66,12 @@ func (am *AssistantManager) Create(dataURL string) error {
 	oai := am.oai
 
 	// POST https://api.openai.com/v1/assistants
-
-	r, err := oai.JSON("/assistants", &fetch.Options{
+	r, err := oai.JSON("POST", "/assistants", &fetch.Options{
 		Body: assistantRequest,
 	})
 
 	if err != nil {
 		return err
-	}
-
-	if r.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", r.StatusCode)
 	}
 
 	fmt.Println(r)
